@@ -30,7 +30,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: '爱宠档案',
+          title: 'MyPET',
           tabBarLabel: '首页',
           tabBarIcon: ({ color }) => <TabIcon name="home" color={color} />,
         }}

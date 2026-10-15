@@ -9,6 +9,7 @@ import { UpgradeSheet } from '@/src/components/UpgradeSheet';
 import { Button, Field, Segment, TextField } from '@/src/components/ui';
 import { Gender, Pet, Species, defaultBathInterval, petLimitFor, todayISO, uid } from '@/src/domain';
 import { pickImage } from '@/src/pickImage';
+import { guessBreed } from '@/src/guessBreed';
 import { useArchive } from '@/src/store';
 import { colors } from '@/src/theme';
 
@@ -116,11 +117,27 @@ export default function NewPetScreen() {
             <Pressable
               style={styles.avatar}
               onPress={() => {
-                void pickImage(`${id}.jpg`).then((uri) => { if (uri) setAvatar(uri); });
+                void pickImage(`${id}.jpg`).then(async (uri) => {
+                  if (!uri) return;
+                  setAvatar(uri);
+                  archive.showToast('正在识别品种');
+                  const guess = await guessBreed(uri);
+                  if (!guess) {
+                    archive.showToast('没能从这张照片看出品种');
+                    return;
+                  }
+                  if (species && species !== 'other' && guess.species !== species) {
+                    archive.showToast(guess.species === 'cat' ? '照片更像一只猫' : '照片更像一只狗');
+                    return;
+                  }
+                  setBreed(guess.breed);
+                  archive.showToast(`照片看起来是${guess.breed}`);
+                });
               }}>
               {avatar ? <Image source={{ uri: avatar }} style={styles.avatarImage} /> : <Ionicons name="image-outline" size={28} color={colors.primary} />}
               <Text style={styles.avatarText}>{avatar ? '更换头像' : '添加头像'}</Text>
             </Pressable>
+            <Text style={styles.avatarHint}>上传后会根据照片猜测品种，可以再改。</Text>
             <Field label="品种">
               <TextField value={breed} onChangeText={setBreed} placeholder="例如：英国短毛猫" />
             </Field>
@@ -153,4 +170,5 @@ const styles = StyleSheet.create({
   avatar: { alignItems: 'center', marginBottom: 20 },
   avatarImage: { width: 88, height: 88, borderRadius: 44 },
   avatarText: { marginTop: 8, color: colors.primary, fontWeight: '600' },
+  avatarHint: { textAlign: 'center', color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: -12, marginBottom: 16 },
 });

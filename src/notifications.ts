@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { ArchiveData, Pet, Settings, addDays, diffDays, latestByDate, todayISO } from '@/src/domain';
+import { ArchiveData, Pet, Settings, addDays, diffDays, forecastFood, latestByDate, todayISO } from '@/src/domain';
 
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
@@ -28,7 +28,7 @@ export async function rescheduleReminders(data: ArchiveData, settings: Settings)
     const plans = collectPlans(data, settings).slice(0, 48);
     for (const plan of plans) {
       await Notifications.scheduleNotificationAsync({
-        content: { title: '爱宠档案', body: plan.body },
+        content: { title: 'MyPET', body: plan.body },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: plan.when },
       });
     }
@@ -46,6 +46,12 @@ function collectPlans(data: ArchiveData, settings: Settings): Plan[] {
       .filter((food) => food.petId === pet.id && food.remaining !== 'finished' && food.expiresOn)
       .forEach((food) => {
         queue(plans, pet, food.expiresOn, [7, 0], today, `${pet.name} 的 ${food.brand} 快到保质期了`);
+      });
+    data.foods
+      .filter((food) => food.petId === pet.id)
+      .forEach((food) => {
+        const forecast = forecastFood(pet, data.weights, food, today);
+        if (forecast) queue(plans, pet, forecast.finishOn, [7, 0], today, `${pet.name} 的${food.brand}快吃完了，可以准备买粮`);
       });
     const internal = latestByDate(data.deworms.filter((row) => row.petId === pet.id && (row.type === 'internal' || row.type === 'both')));
     if (internal) {

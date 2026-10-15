@@ -8,6 +8,7 @@ import { DateField } from '@/src/components/WheelDatePicker';
 import { Button, Field, Segment, TextField } from '@/src/components/ui';
 import { Gender, Species, WeightUnit, countRecords, todayISO } from '@/src/domain';
 import { pickImage } from '@/src/pickImage';
+import { guessBreed } from '@/src/guessBreed';
 import { useArchive } from '@/src/store';
 import { colors } from '@/src/theme';
 
@@ -99,10 +100,28 @@ function Editor({ petId }: { petId: string }) {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Pressable style={styles.avatar} onPress={() => { void pickImage(`${pet.id}.jpg`).then((uri) => { if (uri) setAvatar(uri); }); }}>
+        <Pressable style={styles.avatar} onPress={() => {
+          void pickImage(`${pet.id}.jpg`).then(async (uri) => {
+            if (!uri) return;
+            setAvatar(uri);
+            archive.showToast('正在识别品种');
+            const guess = await guessBreed(uri);
+            if (!guess) {
+              archive.showToast('没能从这张照片看出品种');
+              return;
+            }
+            if (species !== 'other' && guess.species !== species) {
+              archive.showToast(guess.species === 'cat' ? '照片更像一只猫' : '照片更像一只狗');
+              return;
+            }
+            setBreed(guess.breed);
+            archive.showToast(`照片看起来是${guess.breed}`);
+          });
+        }}>
           {avatar ? <Image source={{ uri: avatar }} style={styles.avatarImage} /> : <Ionicons name="image-outline" size={28} color={colors.primary} />}
           <Text style={styles.link}>{avatar ? '更换头像' : '添加头像'}</Text>
         </Pressable>
+        <Text style={styles.avatarHint}>上传后会根据照片猜测品种，可以再改。</Text>
         <Field label="名字" error={errors.name}>
           <TextField value={name} onChangeText={(text) => { setName(text); setErrors((prev) => ({ ...prev, name: text.trim() ? '' : '请填写名字' })); }} />
         </Field>
@@ -158,6 +177,7 @@ const styles = StyleSheet.create({
   avatar: { alignItems: 'center', marginBottom: 16 },
   avatarImage: { width: 88, height: 88, borderRadius: 44 },
   link: { marginTop: 8, color: colors.primary, fontWeight: '600' },
+  avatarHint: { textAlign: 'center', color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: -8, marginBottom: 16 },
   remind: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   remindText: { fontSize: 16, color: colors.text },
   footer: { paddingHorizontal: 20, paddingTop: 8 },

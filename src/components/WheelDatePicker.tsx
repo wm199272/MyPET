@@ -80,8 +80,9 @@ export function WheelDatePicker({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable style={styles.backdrop} onPress={onCancel}>
-        <Pressable style={styles.sheet} onPress={() => undefined}>
+      <View style={styles.backdrop}>
+        <Pressable accessibilityRole="button" accessibilityLabel="关闭" style={styles.dismiss} onPress={onCancel} />
+        <View style={styles.sheet}>
           <Text style={styles.preview}>{formatFullDate(toISO(year, month, safeDay))}</Text>
           <View style={styles.wheels}>
             <View style={styles.highlight} pointerEvents="none" />
@@ -103,8 +104,8 @@ export function WheelDatePicker({
               <Text style={styles.confirm}>确定</Text>
             </Pressable>
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -121,28 +122,56 @@ function Column({
   onSelect: (value: number) => void;
 }) {
   const ref = useRef<ScrollView>(null);
+  const selectedRef = useRef(selected);
+  const fromUser = useRef(false);
+  selectedRef.current = selected;
+  const listKey = `${values.length}:${values[0]}:${values[values.length - 1]}`;
+
   useEffect(() => {
+    if (fromUser.current) {
+      fromUser.current = false;
+      return;
+    }
     const index = Math.max(0, values.indexOf(selected));
     const timer = setTimeout(() => {
       ref.current?.scrollTo({ y: index * ITEM_HEIGHT, animated: false });
     }, 0);
     return () => clearTimeout(timer);
-  }, [selected, values]);
+  }, [selected, listKey]);
+
+  function settle(offsetY: number) {
+    const index = Math.max(0, Math.min(values.length - 1, Math.round(offsetY / ITEM_HEIGHT)));
+    ref.current?.scrollTo({ y: index * ITEM_HEIGHT, animated: false });
+    const next = values[index];
+    if (next !== selectedRef.current) {
+      fromUser.current = true;
+      onSelect(next);
+    }
+  }
 
   return (
     <ScrollView
       ref={ref}
       style={styles.column}
+      nestedScrollEnabled
       showsVerticalScrollIndicator={false}
       snapToInterval={ITEM_HEIGHT}
       decelerationRate="fast"
       scrollEventThrottle={16}
       contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
       onScroll={(event) => {
-        const index = Math.round(event.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-        const next = values[Math.max(0, Math.min(values.length - 1, index))];
-        if (next !== selected) onSelect(next);
-      }}>
+        const index = Math.max(0, Math.min(values.length - 1, Math.round(event.nativeEvent.contentOffset.y / ITEM_HEIGHT)));
+        const next = values[index];
+        if (next !== selectedRef.current) {
+          fromUser.current = true;
+          onSelect(next);
+        }
+      }}
+      onScrollEndDrag={(event) => {
+        const velocity = event.nativeEvent.velocity?.y ?? 0;
+        if (Math.abs(velocity) < 0.1) settle(event.nativeEvent.contentOffset.y);
+      }}
+      onMomentumScrollEnd={(event) => settle(event.nativeEvent.contentOffset.y)}>
       {values.map((item) => (
         <View key={item} style={styles.item}>
           <Text style={item === selected ? styles.itemOn : styles.itemOff}>{format(item)}</Text>
@@ -187,7 +216,8 @@ const styles = StyleSheet.create({
   placeholder: { fontSize: 16, color: colors.textSecondary },
   error: { color: colors.danger, fontSize: 13, marginTop: 6 },
   backdrop: { flex: 1, backgroundColor: 'rgba(61,51,53,0.28)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 18, paddingBottom: 20 },
+  dismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  sheet: { zIndex: 1, backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 18, paddingBottom: 20 },
   preview: { textAlign: 'center', fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
   wheels: { height: ITEM_HEIGHT * VISIBLE, flexDirection: 'row', marginHorizontal: 16 },
   highlight: {
@@ -199,7 +229,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: colors.primarySoft,
   },
-  column: { flex: 1 },
+  column: { flex: 1, height: ITEM_HEIGHT * VISIBLE },
   item: { height: ITEM_HEIGHT, alignItems: 'center', justifyContent: 'center' },
   itemOn: { fontSize: 18, fontWeight: '600', color: colors.text },
   itemOff: { fontSize: 16, color: colors.textSecondary },

@@ -37,7 +37,7 @@ export function MilestoneSheet({
         <Pressable style={styles.panel} onPress={(event) => event.stopPropagation()}>
           {milestone ? (
             <View ref={cardRef} collapsable={false} style={[styles.card, shadow]}>
-              <Text style={styles.kicker}>爱宠档案</Text>
+              <Text style={styles.kicker}>MyPET</Text>
               <Text style={styles.name}>{petName}</Text>
               <Text style={styles.title}>{milestone.title}</Text>
               {milestone.detail ? <Text style={styles.detail}>{milestone.detail}</Text> : null}

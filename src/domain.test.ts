@@ -1,4 +1,7 @@
-import { addDays, ageLabel, buildSuggestions, careStatuses, groupTimeline, isAnniversary, listMilestones, listOnThisDay, todayISO, yearsAgo, type ArchiveData, type Pet, type TimelineEntry } from './domain.ts';
+import { addDays, ageLabel, buildSuggestions, careStatuses, forecastFood, groupTimeline, isAnniversary, listMilestones, listOnThisDay, todayISO, yearsAgo, type ArchiveData, type Pet, type TimelineEntry } from './domain.ts';
+import { gramsAt } from './feedingGuides.ts';
+import { breedFromLabels } from './breedLabels.ts';
+import { dewormMedicines } from './dewormMedicines.ts';
 
 const today = '2026-10-14';
 
@@ -35,25 +38,25 @@ function assert(condition: boolean, message: string) {
 const base = empty();
 const foodSoon = buildSuggestions(pet(), {
   ...base,
-  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: addDays(today, 3), openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today }],
+  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: addDays(today, 3), openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today, guideId: '', bagGrams: null, dailyGrams: null }],
 }, 'jin', today);
 assert(foodSoon.some((item) => item.text === '主食罐 还有 3 天到期'), '食品临期');
 
 const foodLate = buildSuggestions(pet(), {
   ...base,
-  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: addDays(today, -2), openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today }],
+  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: addDays(today, -2), openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today, guideId: '', bagGrams: null, dailyGrams: null }],
 }, 'jin', today);
 assert(foodLate.some((item) => item.text === '主食罐 已过期 2 天'), '食品过期');
 
 const opened = buildSuggestions(pet(), {
   ...base,
-  foods: [{ id: 'f1', petId: 'p1', brand: '主粮', kind: 'staple', spec: '', producedOn: '', expiresOn: addDays(today, 40), openedOn: addDays(today, -10), openedDays: 7, remaining: 'plenty', loggedOn: today }],
+  foods: [{ id: 'f1', petId: 'p1', brand: '主粮', kind: 'staple', spec: '', producedOn: '', expiresOn: addDays(today, 40), openedOn: addDays(today, -10), openedDays: 7, remaining: 'plenty', loggedOn: today, guideId: '', bagGrams: null, dailyGrams: null }],
 }, 'jin', today);
 assert(opened.some((item) => item.text.includes('已开封 10 天')), '开封超期');
 
 const finished = buildSuggestions(pet(), {
   ...base,
-  foods: [{ id: 'f1', petId: 'p1', brand: '主粮', kind: 'staple', spec: '', producedOn: '', expiresOn: addDays(today, -1), openedOn: '', openedDays: null, remaining: 'finished', loggedOn: today }],
+  foods: [{ id: 'f1', petId: 'p1', brand: '主粮', kind: 'staple', spec: '', producedOn: '', expiresOn: addDays(today, -1), openedOn: '', openedDays: null, remaining: 'finished', loggedOn: today, guideId: '', bagGrams: null, dailyGrams: null }],
 }, 'jin', today);
 assert(finished.length === 0, '吃完后不再提醒');
 
@@ -113,7 +116,7 @@ assert(months[0]?.title === '2026年10月' && months[1]?.title === '2026年9月'
 
 const dueToday = buildSuggestions(pet(), {
   ...base,
-  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: today, openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today }],
+  foods: [{ id: 'f1', petId: 'p1', brand: '主食罐', kind: 'can', spec: '', producedOn: '', expiresOn: today, openedOn: '', openedDays: null, remaining: 'plenty', loggedOn: today, guideId: '', bagGrams: null, dailyGrams: null }],
 }, 'jin', today);
 assert(dueToday.some((item) => item.text === '主食罐 还有 0 天到期' && item.actionLabel === '去查看' && item.basis.includes('2026年10月14日')), '当天到期');
 
@@ -190,5 +193,56 @@ const crossed = listMilestones(pet(), {
 }, 'jin', today);
 assert(crossed.some((item) => item.title === '体重到了 10 斤'), '体重跨过整数');
 assert(!listMilestones(pet(), base, 'jin', today).length, '没有记录就没有里程碑');
+
+assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 4, grams: 56 }, { kg: 5, grams: 65 }, { kg: 6, grams: 74 }], 4).grams === 56, '包装表整档');
+assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 4, grams: 56 }, { kg: 5, grams: 65 }], 4.5).grams === 61, '包装表两档之间');
+assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 6, grams: 74 }], 2).clamped, '低于包装表');
+
+const rationPet = pet();
+rationPet.neutered = true;
+const ration = forecastFood(rationPet, [
+  { id: 'w1', petId: 'p1', date: today, weightKg: 4, condition: '', note: '' },
+], {
+  id: 'bag',
+  petId: 'p1',
+  brand: '皇家 室内成猫',
+  kind: 'staple',
+  spec: '',
+  producedOn: '',
+  expiresOn: addDays(today, 200),
+  openedOn: addDays(today, -2),
+  openedDays: null,
+  remaining: 'plenty',
+  loggedOn: today,
+  guideId: 'rc-cat-indoor',
+  bagGrams: 400,
+  dailyGrams: null,
+}, today);
+assert(ration?.dailyGrams === 56 && ration.daysLeft === 6, '按体重估算还能吃几天');
+
+const buy = buildSuggestions(rationPet, {
+  ...base,
+  weights: [{ id: 'w1', petId: 'p1', date: today, weightKg: 4, condition: '', note: '' }],
+  foods: [{
+    id: 'bag',
+    petId: 'p1',
+    brand: '皇家 室内成猫',
+    kind: 'staple',
+    spec: '',
+    producedOn: '',
+    expiresOn: addDays(today, 200),
+    openedOn: addDays(today, -2),
+    openedDays: null,
+    remaining: 'plenty',
+    loggedOn: today,
+    guideId: 'rc-cat-indoor',
+    bagGrams: 400,
+    dailyGrams: null,
+  }],
+}, 'jin', today);
+assert(buy.some((item) => item.text === '皇家 室内成猫 大约还有 6 天吃完' && item.basis.includes('每日 56 克')), '该买粮提醒');
+assert(dewormMedicines.find((item) => item.name === '贝卫多')?.days === 84, '贝卫多 12 周');
+assert(breedFromLabels([{ identifier: 'Pembroke Welsh corgi', confidence: 0.4 }])?.breed === '柯基', '认出柯基');
+assert(breedFromLabels([{ identifier: 'dog', confidence: 0.9 }]) == null, '只有狗看不出品种');
 
 console.log('domain rules ok');

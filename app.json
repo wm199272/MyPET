@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "爱宠档案",
+    "name": "MyPET",
     "slug": "pet-archive",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,7 +11,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.petarchive",
       "infoPlist": {
-        "CFBundleDisplayName": "爱宠档案"
+        "CFBundleDisplayName": "MyPET"
       }
     },
     "android": {
@@ -42,7 +42,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "用于为宠物和体检单保存照片"
+          "photosPermission": "用于保存照片，并在手机上根据头像识别品种"
         }
       ],
       [

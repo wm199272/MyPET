@@ -127,6 +127,16 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       if (!columns.some((column) => column.name === 'weight_unit')) {
         await db.execAsync("ALTER TABLE pets ADD COLUMN weight_unit TEXT NOT NULL DEFAULT 'jin'");
       }
+      const foodColumns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(foods)');
+      if (!foodColumns.some((column) => column.name === 'guide_id')) {
+        await db.execAsync("ALTER TABLE foods ADD COLUMN guide_id TEXT NOT NULL DEFAULT ''");
+      }
+      if (!foodColumns.some((column) => column.name === 'bag_grams')) {
+        await db.execAsync('ALTER TABLE foods ADD COLUMN bag_grams REAL');
+      }
+      if (!foodColumns.some((column) => column.name === 'daily_grams')) {
+        await db.execAsync('ALTER TABLE foods ADD COLUMN daily_grams REAL');
+      }
       return db;
     });
   }
@@ -197,7 +207,7 @@ export async function loadState(): Promise<{ data: ArchiveData; settings: Settin
     db.getAllAsync<{ id: string; pet_id: string; recorded_on: string; amount: number; category: ExpenseRecord['category']; note: string; source_type: ExpenseRecord['sourceType']; source_id: string }>(
       'SELECT * FROM expenses',
     ),
-    db.getAllAsync<{ id: string; pet_id: string; brand: string; kind: FoodRecord['kind']; spec: string; produced_on: string; expires_on: string; opened_on: string; opened_days: number | null; remaining: FoodRecord['remaining']; logged_on: string }>(
+    db.getAllAsync<{ id: string; pet_id: string; brand: string; kind: FoodRecord['kind']; spec: string; produced_on: string; expires_on: string; opened_on: string; opened_days: number | null; remaining: FoodRecord['remaining']; logged_on: string; guide_id: string | null; bag_grams: number | null; daily_grams: number | null }>(
       'SELECT * FROM foods',
     ),
     db.getAllAsync<{ key: string; value: string }>('SELECT * FROM settings'),
@@ -281,6 +291,9 @@ export async function loadState(): Promise<{ data: ArchiveData; settings: Settin
       openedDays: row.opened_days,
       remaining: row.remaining,
       loggedOn: row.logged_on,
+      guideId: row.guide_id || '',
+      bagGrams: row.bag_grams,
+      dailyGrams: row.daily_grams,
     })),
   };
 
@@ -552,12 +565,13 @@ async function writeCareCost(
 export async function saveFood(row: FoodRecord) {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT INTO foods (id, pet_id, brand, kind, spec, produced_on, expires_on, opened_on, opened_days, remaining, logged_on)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO foods (id, pet_id, brand, kind, spec, produced_on, expires_on, opened_on, opened_days, remaining, logged_on, guide_id, bag_grams, daily_grams)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        pet_id = excluded.pet_id, brand = excluded.brand, kind = excluded.kind, spec = excluded.spec,
        produced_on = excluded.produced_on, expires_on = excluded.expires_on, opened_on = excluded.opened_on,
-       opened_days = excluded.opened_days, remaining = excluded.remaining, logged_on = excluded.logged_on`,
+       opened_days = excluded.opened_days, remaining = excluded.remaining, logged_on = excluded.logged_on,
+       guide_id = excluded.guide_id, bag_grams = excluded.bag_grams, daily_grams = excluded.daily_grams`,
     row.id,
     row.petId,
     row.brand,
@@ -569,6 +583,9 @@ export async function saveFood(row: FoodRecord) {
     row.openedDays,
     row.remaining,
     row.loggedOn,
+    row.guideId,
+    row.bagGrams,
+    row.dailyGrams,
   );
 }
 

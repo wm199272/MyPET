@@ -14,6 +14,7 @@ import {
   diffDays,
   expenseCategoryLabel,
   formatDate,
+  forecastFood,
   monthKey,
   rangeStart,
   recentMonthKeys,
@@ -164,6 +165,7 @@ export default function StatsScreen() {
         {opened.length === 0 ? <Text style={styles.quiet}>没有已开封、还没吃完的食品</Text> : opened.map((food) => (
           <Text key={food.id} style={styles.foodLine}>
             {food.brand} · {formatDate(food.openedOn, today)}开封 · 已 {diffDays(food.openedOn, today)} 天
+            {forecastFood(pet, archive.data.weights, food) ? ` · 每天 ${forecastFood(pet, archive.data.weights, food)?.dailyGrams} 克` : ''}
           </Text>
         ))}
       </Card>

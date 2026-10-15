@@ -29,6 +29,12 @@ function read(): Persisted {
       ...pet,
       weightUnit: pet.weightUnit === 'kg' || pet.weightUnit === 'jin' ? pet.weightUnit : settings.weightUnit,
     }));
+    data.foods = (data.foods || []).map((food) => ({
+      ...food,
+      guideId: food.guideId || '',
+      bagGrams: typeof food.bagGrams === 'number' ? food.bagGrams : null,
+      dailyGrams: typeof food.dailyGrams === 'number' ? food.dailyGrams : null,
+    }));
     if (!data.pets.some((pet) => pet.id === settings.currentPetId)) {
       settings.currentPetId = data.pets[0]?.id ?? '';
     }

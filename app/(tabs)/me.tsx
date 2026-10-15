@@ -76,7 +76,7 @@ export default function MeScreen() {
             thumbColor={colors.white}
           />
         </View>
-        <Text style={styles.hint}>食品提前 7 天和当天各提醒一次，驱虫、疫苗和体检提前 3 天和当天各提醒一次。</Text>
+        <Text style={styles.hint}>食品保质期和口粮吃完都提前 7 天和当天各提醒一次，驱虫、疫苗和体检提前 3 天和当天各提醒一次。</Text>
         {Platform.OS === 'web' ? <Text style={styles.hint}>系统通知会在手机 App 里发出，这里的开关会保存下来。</Text> : null}
         {archive.data.pets.map((pet) => (
           <View key={pet.id} style={styles.petSwitch}>
@@ -103,7 +103,7 @@ export default function MeScreen() {
 
       <SectionTitle title="关于" />
       <Card>
-        <Text style={styles.name}>爱宠档案</Text>
+        <Text style={styles.name}>MyPET</Text>
         <Text style={styles.hint}>记录默认保存在这台手机上。开通家庭版后，会加密备份到云端，也能和家人一起共养。</Text>
       </Card>
       <UpgradeSheet visible={showUpgrade} onClose={() => setShowUpgrade(false)} onConfirm={() => void confirmUpgrade()} />

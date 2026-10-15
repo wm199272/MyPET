@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, shadow } from '@/src/theme';
@@ -10,6 +11,9 @@ import '@/src/webAlert';
 export { ErrorBoundary } from 'expo-router';
 
 export default function RootLayout() {
+  useEffect(() => {
+    if (Platform.OS === 'web') document.title = 'MyPET';
+  }, []);
   return (
     <StoreProvider>
       <StatusBar style="dark" />

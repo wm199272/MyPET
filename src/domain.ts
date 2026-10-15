@@ -1,3 +1,5 @@
+import { feedGuides, gramsAt } from './feedingGuides.ts';
+
 export type Species = 'cat' | 'dog' | 'other';
 export type Gender = 'female' | 'male' | 'unknown';
 export type WeightUnit = 'jin' | 'kg';
@@ -103,6 +105,9 @@ export type FoodRecord = {
   openedDays: number | null;
   remaining: FoodRemaining;
   loggedOn: string;
+  guideId: string;
+  bagGrams: number | null;
+  dailyGrams: number | null;
 };
 
 export type Plan = 'free' | 'family';
@@ -374,6 +379,73 @@ export function latestByDate<T extends { date: string }>(rows: T[]): T | undefin
   return byDateDesc(rows)[0];
 }
 
+export type BagForecast = {
+  dailyGrams: number;
+  remainingGrams: number;
+  daysLeft: number;
+  finishOn: string;
+  clamped: boolean;
+  basis: string;
+};
+
+export function forecastFood(pet: Pet, weights: WeightRecord[], food: FoodRecord, today = todayISO()): BagForecast | null {
+  if (food.kind !== 'staple' || food.remaining === 'finished') return null;
+  if (!food.bagGrams || food.bagGrams <= 0 || !food.openedOn) return null;
+
+  const guide = feedGuides.find((item) => item.id === food.guideId);
+  let daily = 0;
+  let clamped = false;
+  let note = '';
+  if (guide) {
+    if (guide.species !== pet.species) return null;
+    const weight = weights
+      .filter((row) => row.petId === pet.id && row.date <= today)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
+    if (!weight) return null;
+    const points = pet.neutered && guide.neuteredPoints ? guide.neuteredPoints : guide.points;
+    const hit = gramsAt(points, weight.weightKg);
+    daily = hit.grams;
+    clamped = hit.clamped;
+    const who = pet.neutered && guide.neuteredPoints ? '，按绝育一档' : '';
+    note = `${formatWeight(weight.weightKg, pet.weightUnit)} · 每日 ${daily} 克 · ${guide.note}${who}`;
+  } else if (food.guideId === 'custom' && food.dailyGrams && food.dailyGrams > 0) {
+    daily = Math.round(food.dailyGrams);
+    note = `每日 ${daily} 克 · 按填写的每日用量`;
+  } else {
+    return null;
+  }
+  if (daily <= 0) return null;
+
+  const eatenDays = Math.max(0, diffDays(food.openedOn, today));
+  const remainingGrams = food.bagGrams - daily * eatenDays;
+  const finishOn = remainingGrams <= 0
+    ? addDays(food.openedOn, Math.ceil(food.bagGrams / daily))
+    : addDays(today, Math.ceil(remainingGrams / daily));
+  const daysLeft = diffDays(today, finishOn);
+  const outside = clamped ? ' · 体重超出包装表，按最接近的一档' : '';
+  return {
+    dailyGrams: daily,
+    remainingGrams: Math.round(remainingGrams),
+    daysLeft,
+    finishOn,
+    clamped,
+    basis: `${note}${outside}`,
+  };
+}
+
+export function rationStatus(forecast: BagForecast): string {
+  if (forecast.daysLeft < 0) return `按用量已经吃完 ${-forecast.daysLeft} 天`;
+  if (forecast.daysLeft === 0) return '按用量今天会吃完';
+  return `大约还有 ${forecast.daysLeft} 天`;
+}
+
+function rationNote(food: FoodRecord, data: ArchiveData, _unit: WeightUnit, today: string): string {
+  const pet = data.pets.find((item) => item.id === food.petId);
+  if (!pet) return '';
+  const forecast = forecastFood(pet, data.weights, food, today);
+  return forecast ? ` · 每天 ${forecast.dailyGrams} 克` : '';
+}
+
 export type DueItem = {
   key: string;
   petId: string;
@@ -426,6 +498,13 @@ export function listDue(pet: Pet, data: ArchiveData, today = todayISO()): DueIte
   data.foods
     .filter((row) => row.petId === pet.id && row.remaining !== 'finished' && row.expiresOn)
     .forEach((row) => push(`food-${row.id}`, row.brand, row.expiresOn));
+
+  data.foods
+    .filter((row) => row.petId === pet.id)
+    .forEach((row) => {
+      const forecast = forecastFood(pet, data.weights, row, today);
+      if (forecast) push(`ration-${row.id}`, `${row.brand} 该买粮`, forecast.finishOn);
+    });
 
   return items.sort((a, b) => a.days - b.days);
 }
@@ -521,7 +600,7 @@ export function buildTimeline(data: ArchiveData, fallbackUnit: WeightUnit, today
       expiresOn: row.expiresOn,
       finished: row.remaining === 'finished',
       title: '食品',
-      summary: `${row.brand} · ${foodRemainingLabel[row.remaining]} · ${expiry}`,
+      summary: `${row.brand} · ${foodRemainingLabel[row.remaining]} · ${expiry}${rationNote(row, data, unitOf(row.petId), today)}`,
     });
   });
   return entries.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -700,6 +779,23 @@ export function buildSuggestions(pet: Pet, data: ArchiveData, unit: WeightUnit, 
             actionLabel: '去查看',
           });
         }
+      }
+      const forecast = forecastFood(pet, data.weights, food, today);
+      if (forecast && forecast.daysLeft <= 7) {
+        suggestions.push({
+          id: `food-bag-${food.id}`,
+          tone: forecast.daysLeft < 0 ? 'overdue' : 'soon',
+          text: forecast.daysLeft < 0
+            ? `${food.brand} 按用量已经吃完 ${-forecast.daysLeft} 天`
+            : forecast.daysLeft === 0
+              ? `${food.brand} 按用量今天会吃完`
+              : `${food.brand} 大约还有 ${forecast.daysLeft} 天吃完`,
+          basis: `${forecast.basis} · 预计 ${formatFullDate(forecast.finishOn)} 吃完`,
+          action: 'open-record',
+          recordType: 'food',
+          recordId: food.id,
+          actionLabel: '去查看',
+        });
       }
     });
 

@@ -15,10 +15,12 @@ import {
   ageLabel,
   buildSuggestions,
   buildTimeline,
+  forecastFood,
   formatDate,
   listDue,
   listMilestones,
   listOnThisDay,
+  rationStatus,
   recordTypeLabel,
   speciesLabel,
 } from '@/src/domain';
@@ -45,6 +47,11 @@ export default function HomeScreen() {
   const due = listDue(pet, archive.data);
   const milestones = listMilestones(pet, archive.data, unit);
   const memories = listOnThisDay(archive.data, pet.id, unit);
+  const rations = archive.data.foods.flatMap((food) => {
+    if (food.petId !== pet.id) return [];
+    const forecast = forecastFood(pet, archive.data.weights, food);
+    return forecast ? [{ food, forecast }] : [];
+  });
   const suggestions = buildSuggestions(pet, archive.data, unit).slice(0, 2);
   const recent = buildTimeline(archive.data, unit)
     .filter((item) => item.petId === pet.id)
@@ -101,6 +108,21 @@ export default function HomeScreen() {
         </>
       ) : null}
 
+      {rations.length > 0 ? (
+        <>
+          <SectionTitle title="口粮" />
+          {rations.map((item) => (
+            <Pressable key={item.food.id} style={styles.recent} onPress={() => router.push(`/record/food?id=${item.food.id}`)}>
+              <View style={styles.recentBody}>
+                <Text style={styles.dueTitle}>{item.food.brand}</Text>
+                <Text style={styles.dueTitle}>每天 {item.forecast.dailyGrams} 克 · {rationStatus(item.forecast)}</Text>
+                <Text style={styles.dueSub}>{formatDate(item.forecast.finishOn)}吃完</Text>
+              </View>
+            </Pressable>
+          ))}
+        </>
+      ) : null}
+
       <SectionTitle title="即将到期" />
       {due.length === 0 ? <Text style={styles.quiet}>还没有到期事项</Text> : due.slice(0, 4).map((item) => (
         <View key={item.key} style={styles.dueRow}>
@@ -141,6 +163,9 @@ export default function HomeScreen() {
           </Pressable>
         ))}
       </View>
+      <Pressable accessibilityRole="button" accessibilityLabel="登记猫粮或狗粮" style={styles.rationEntry} onPress={() => router.push('/record/food?from=home')}>
+        <Text style={styles.switch}>登记猫粮 / 狗粮</Text>
+      </Pressable>
     </ScrollView>
       <Modal visible={switching} transparent animationType="slide" onRequestClose={() => setSwitching(false)}>
         <Pressable style={styles.backdrop} onPress={() => setSwitching(false)}>
@@ -242,6 +267,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   shortcutLabel: { marginTop: 8, fontSize: 13, color: colors.text },
+  rationEntry: { marginTop: 18, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   backdrop: { flex: 1, backgroundColor: 'rgba(61,51,53,0.28)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 28 },
   sheetTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 8 },
