@@ -1,0 +1,94 @@
+name: Build iOS
+
+"on":
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --non-interactive
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"
+
+      - name: Point Xcode at Node
+        run: echo "export NODE_BINARY=$(command -v node)" >> ios/.xcode.env
+
+      - name: Build an unsigned iPhone package
+        run: |
+          set +e
+          workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' ! -name 'Pods.xcworkspace' | head -1)
+          if [ -z "$workspace" ]; then
+            echo "prebuild 没有生成 xcworkspace"
+            exit 1
+          fi
+          scheme=$(basename "$workspace" .xcworkspace)
+          echo "workspace=$workspace scheme=$scheme"
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/device \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64 \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+            SWIFT_EXPERIMENTAL_FEATURE_DEBUG_DESCRIPTION_MACRO=NO \
+            build > "$RUNNER_TEMP/device.log" 2>&1
+          status=$?
+          cp "$RUNNER_TEMP/device.log" "$GITHUB_WORKSPACE/device.log" || true
+          if [ "$status" -ne 0 ]; then
+            grep -n -E "error:|fatal error" "$RUNNER_TEMP/device.log" | cut -c1-500 | head -80 > "$RUNNER_TEMP/errors.txt" || true
+            if [ ! -s "$RUNNER_TEMP/errors.txt" ]; then
+              tail -n 80 "$RUNNER_TEMP/device.log" > "$RUNNER_TEMP/errors.txt" || true
+            fi
+            echo "===== compiler errors ====="
+            cat "$RUNNER_TEMP/errors.txt"
+            exit "$status"
+          fi
+          app=$(find build/device/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d | head -1)
+          if [ -z "$app" ]; then
+            echo "没有找到 .app"
+            exit 1
+          fi
+          echo "app=$app"
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$app" Payload/
+          zip -r "$GITHUB_WORKSPACE/PetArchive-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-logs
+          path: device.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PetArchive-builds
+          path: PetArchive-unsigned.ipa
+          if-no-files-found: error

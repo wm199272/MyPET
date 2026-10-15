@@ -8,7 +8,11 @@
     "scheme": "petarchive",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.petarchive",
+      "infoPlist": {
+        "CFBundleDisplayName": "爱宠档案"
+      }
     },
     "android": {
       "adaptiveIcon": {
