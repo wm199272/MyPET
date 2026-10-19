@@ -24,6 +24,7 @@ export function startPetView(options: {
   getState: () => StageState;
   element?: HTMLElement;
   endFrame?: () => void;
+  onError?: () => void;
   initialWidth: number;
   initialHeight: number;
 }): PetView {
@@ -135,16 +136,28 @@ export function startPetView(options: {
       builtKey = '';
       return;
     }
-    replacePet(mesh ? groupFromPointE(mesh, worn) : buildPet(figure, worn));
+    try {
+      replacePet(mesh ? groupFromPointE(mesh, worn) : buildPet(figure, worn));
+    } catch {
+      replacePet(buildPet(figure, null));
+    }
   }
 
   function tick() {
     if (stopped) return;
-    void ensure();
+    void ensure().catch(() => {
+      if (!stopped) options.onError?.();
+    });
     if (!dragging) yaw += 0.004;
     pivot.rotation.y = yaw;
-    renderer.render(scene, camera);
-    options.endFrame?.();
+    try {
+      renderer.render(scene, camera);
+      options.endFrame?.();
+    } catch {
+      stopped = true;
+      options.onError?.();
+      return;
+    }
     frame = requestAnimationFrame(tick);
   }
 

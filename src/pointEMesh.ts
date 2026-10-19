@@ -17,7 +17,7 @@ export async function loadBreedMesh(title: string, species: Species): Promise<Ar
       return await response.arrayBuffer();
     }
     const moduleId = breedMeshModule[file];
-    if (!moduleId) return null;
+    if (moduleId == null) return null;
     const asset = Asset.fromModule(moduleId);
     if (!asset.localUri) await asset.downloadAsync();
     const response = await fetch(asset.localUri || asset.uri);
