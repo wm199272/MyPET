@@ -29,6 +29,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="pet/new" options={{ title: '添加宠物' }} />
         <Stack.Screen name="pet/[id]" options={{ title: '宠物档案' }} />
+        <Stack.Screen name="fortune" options={{ headerShown: false }} />
+        <Stack.Screen name="wardrobe" options={{ title: '试衣间' }} />
         <Stack.Screen name="record/[type]" options={{ title: '记一笔' }} />
       </Stack>
       <Toast />

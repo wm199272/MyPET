@@ -2,6 +2,7 @@ import { ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 
 import { LineIcon, LineIconName } from '@/src/components/LineIcon';
+import { RecordTabBar } from '@/src/components/RecordTabBar';
 import { colors } from '@/src/theme';
 
 function TabIcon({ name, color }: { name: LineIconName; color: ColorValue }) {
@@ -11,6 +12,7 @@ function TabIcon({ name, color }: { name: LineIconName; color: ColorValue }) {
 export default function TabLayout() {
   return (
     <Tabs
+      tabBar={(props) => <RecordTabBar {...props} />}
       screenOptions={{
         headerStyle: { backgroundColor: colors.bg },
         headerShadowVisible: false,

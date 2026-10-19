@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
+  deleteGarment,
   deletePet,
   deleteRecord,
   loadState,
@@ -9,10 +10,12 @@ import {
   saveDeworm,
   saveExpense,
   saveFood,
+  saveGarment,
   savePet,
   saveSettings,
   saveVaccine,
   saveWeight,
+  wearGarment,
 } from '@/src/db';
 import {
   ArchiveData,
@@ -21,6 +24,7 @@ import {
   DewormRecord,
   ExpenseRecord,
   FoodRecord,
+  Garment,
   Pet,
   Plan,
   Settings,
@@ -52,6 +56,9 @@ type StoreValue = {
   saveVaccine: (row: VaccineRecord) => Promise<void>;
   saveExpense: (row: ExpenseRecord) => Promise<void>;
   saveFood: (row: FoodRecord) => Promise<void>;
+  saveGarment: (row: Garment) => Promise<void>;
+  removeGarment: (id: string) => Promise<void>;
+  wearGarment: (petId: string, id: string) => Promise<void>;
   removeRecord: (type: 'weight' | 'checkup' | 'bath' | 'deworm' | 'vaccine' | 'expense' | 'food', id: string) => Promise<void>;
 };
 
@@ -150,6 +157,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       saveFood: async (row) => {
         await saveFood(row);
+        await refresh();
+      },
+      saveGarment: async (row) => {
+        await saveGarment(row);
+        await refresh();
+      },
+      removeGarment: async (id) => {
+        await deleteGarment(id);
+        await refresh();
+      },
+      wearGarment: async (petId, id) => {
+        await wearGarment(petId, id);
         await refresh();
       },
       removeRecord: async (type, id) => {

@@ -6,6 +6,7 @@ export type WeightUnit = 'jin' | 'kg';
 export type WeightCondition = 'thin' | 'normal' | 'heavy';
 export type ExpenseCategory = 'food' | 'snack' | 'medical' | 'groom' | 'supply' | 'other';
 export type FoodKind = 'staple' | 'snack' | 'can' | 'supplement';
+export type GarmentKind = 'harness' | 'onesie' | 'cooling';
 export type FoodRemaining = 'plenty' | 'low' | 'finished';
 export type DewormType = 'internal' | 'external' | 'both';
 export type BathPlace = 'home' | 'shop';
@@ -89,8 +90,17 @@ export type ExpenseRecord = {
   amount: number;
   category: ExpenseCategory;
   note: string;
-  sourceType: '' | 'checkup' | 'bath' | 'vaccine';
+  sourceType: '' | 'checkup' | 'bath' | 'vaccine' | 'food';
   sourceId: string;
+};
+
+export type Garment = {
+  id: string;
+  petId: string;
+  kind: GarmentKind;
+  name: string;
+  photo: string;
+  worn: boolean;
 };
 
 export type FoodRecord = {
@@ -108,6 +118,7 @@ export type FoodRecord = {
   guideId: string;
   bagGrams: number | null;
   dailyGrams: number | null;
+  cost: number | null;
 };
 
 export type Plan = 'free' | 'family';
@@ -139,6 +150,7 @@ export type ArchiveData = {
   vaccines: VaccineRecord[];
   expenses: ExpenseRecord[];
   foods: FoodRecord[];
+  garments: Garment[];
 };
 
 export const emptyArchive = (): ArchiveData => ({
@@ -150,6 +162,7 @@ export const emptyArchive = (): ArchiveData => ({
   vaccines: [],
   expenses: [],
   foods: [],
+  garments: [],
 });
 
 export const defaultSettings = (): Settings => ({
@@ -199,6 +212,12 @@ export const expenseCategoryLabel: Record<ExpenseCategory, string> = {
   groom: '洗护',
   supply: '用品',
   other: '其他',
+};
+
+export const garmentKindLabel: Record<GarmentKind, string> = {
+  harness: '胸背',
+  onesie: '四脚衣',
+  cooling: '凉凉衣',
 };
 
 export const foodKindLabel: Record<FoodKind, string> = {
@@ -497,13 +516,13 @@ export function listDue(pet: Pet, data: ArchiveData, today = todayISO()): DueIte
 
   data.foods
     .filter((row) => row.petId === pet.id && row.remaining !== 'finished' && row.expiresOn)
-    .forEach((row) => push(`food-${row.id}`, row.brand, row.expiresOn));
+    .forEach((row) => push(`food-${row.id}`, `${foodKindLabel[row.kind]} · ${row.brand}`, row.expiresOn));
 
   data.foods
     .filter((row) => row.petId === pet.id)
     .forEach((row) => {
       const forecast = forecastFood(pet, data.weights, row, today);
-      if (forecast) push(`ration-${row.id}`, `${row.brand} 该买粮`, forecast.finishOn);
+      if (forecast) push(`ration-${row.id}`, `${foodKindLabel[row.kind]} · ${row.brand} 该买粮`, forecast.finishOn);
     });
 
   return items.sort((a, b) => a.days - b.days);
@@ -581,17 +600,21 @@ export function buildTimeline(data: ArchiveData, fallbackUnit: WeightUnit, today
     });
   });
   data.expenses.forEach((row) => {
+    const food = row.sourceType === 'food' ? data.foods.find((item) => item.id === row.sourceId) : undefined;
+    const foodText = food ? ` · ${foodKindLabel[food.kind]} ${food.brand}` : '';
     entries.push({
       id: row.id,
       petId: row.petId,
       type: 'expense',
       date: row.date,
       title: '消费',
-      summary: `${formatMoney(row.amount)} · ${expenseCategoryLabel[row.category]}`,
+      summary: `${formatMoney(row.amount)} · ${expenseCategoryLabel[row.category]}${foodText}`,
     });
   });
   data.foods.forEach((row) => {
     const expiry = row.expiresOn ? `到期 ${formatDate(row.expiresOn, today)}` : '未填保质期';
+    const spend = linkedFoodSpend(data, row.id) ?? (row.cost != null && row.cost > 0 ? row.cost : null);
+    const price = spend != null ? ` · ${formatMoney(spend)}` : '';
     entries.push({
       id: row.id,
       petId: row.petId,
@@ -600,7 +623,7 @@ export function buildTimeline(data: ArchiveData, fallbackUnit: WeightUnit, today
       expiresOn: row.expiresOn,
       finished: row.remaining === 'finished',
       title: '食品',
-      summary: `${row.brand} · ${foodRemainingLabel[row.remaining]} · ${expiry}${rationNote(row, data, unitOf(row.petId), today)}`,
+      summary: `${foodKindLabel[row.kind]} · ${row.brand} · ${foodRemainingLabel[row.remaining]} · ${expiry}${price}${rationNote(row, data, unitOf(row.petId), today)}`,
     });
   });
   return entries.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -1019,10 +1042,20 @@ export function countRecords(petId: string, data: ArchiveData): number {
     data.deworms.filter((row) => row.petId === petId).length +
     data.vaccines.filter((row) => row.petId === petId).length +
     data.expenses.filter((row) => row.petId === petId).length +
-    data.foods.filter((row) => row.petId === petId).length
+    data.foods.filter((row) => row.petId === petId).length +
+    data.garments.filter((row) => row.petId === petId).length
   );
 }
 
 export function expenseCategoryForSource(source: 'checkup' | 'bath' | 'vaccine'): ExpenseCategory {
   return source === 'bath' ? 'groom' : 'medical';
+}
+
+export function expenseCategoryForFood(kind: FoodKind): ExpenseCategory {
+  return kind === 'snack' ? 'snack' : 'food';
+}
+
+export function linkedFoodSpend(data: ArchiveData, foodId: string): number | null {
+  const row = data.expenses.find((item) => item.sourceType === 'food' && item.sourceId === foodId);
+  return row ? row.amount : null;
 }

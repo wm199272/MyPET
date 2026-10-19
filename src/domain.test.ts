@@ -1,7 +1,9 @@
-import { addDays, ageLabel, buildSuggestions, careStatuses, forecastFood, groupTimeline, isAnniversary, listMilestones, listOnThisDay, todayISO, yearsAgo, type ArchiveData, type Pet, type TimelineEntry } from './domain.ts';
-import { gramsAt } from './feedingGuides.ts';
+import { addDays, ageLabel, buildSuggestions, careStatuses, expenseCategoryForFood, forecastFood, groupTimeline, isAnniversary, linkedFoodSpend, listMilestones, listOnThisDay, todayISO, yearsAgo, type ArchiveData, type Pet, type TimelineEntry } from './domain.ts';
+import { feedGuides, gramsAt, guidesFor } from './feedingGuides.ts';
 import { breedFromLabels } from './breedLabels.ts';
 import { dewormMedicines } from './dewormMedicines.ts';
+import { brandsFor } from './foodBrands.ts';
+import { breedNames, figureFor } from './petFigure.ts';
 
 const today = '2026-10-14';
 
@@ -28,7 +30,7 @@ function pet(): Pet {
 }
 
 function empty(): ArchiveData {
-  return { pets: [pet()], weights: [], checkups: [], baths: [], deworms: [], vaccines: [], expenses: [], foods: [] };
+  return { pets: [pet()], weights: [], checkups: [], baths: [], deworms: [], vaccines: [], expenses: [], foods: [], garments: [] };
 }
 
 function assert(condition: boolean, message: string) {
@@ -197,6 +199,9 @@ assert(!listMilestones(pet(), base, 'jin', today).length, '没有记录就没有
 assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 4, grams: 56 }, { kg: 5, grams: 65 }, { kg: 6, grams: 74 }], 4).grams === 56, '包装表整档');
 assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 4, grams: 56 }, { kg: 5, grams: 65 }], 4.5).grams === 61, '包装表两档之间');
 assert(gramsAt([{ kg: 3, grams: 45 }, { kg: 6, grams: 74 }], 2).clamped, '低于包装表');
+assert(feedGuides.length >= 30, '包装表不少于 30 种');
+assert(guidesFor('cat').length >= 12, '猫包装表不少于 12 种');
+assert(guidesFor('dog').length >= 20, '狗包装表不少于 20 种');
 
 const rationPet = pet();
 rationPet.neutered = true;
@@ -242,7 +247,24 @@ const buy = buildSuggestions(rationPet, {
 }, 'jin', today);
 assert(buy.some((item) => item.text === '皇家 室内成猫 大约还有 6 天吃完' && item.basis.includes('每日 56 克')), '该买粮提醒');
 assert(dewormMedicines.find((item) => item.name === '贝卫多')?.days === 84, '贝卫多 12 周');
+assert(brandsFor('cat').length >= 20, '猫主粮品牌不少于 20');
+assert(brandsFor('dog').length >= 20, '狗主粮品牌不少于 20');
 assert(breedFromLabels([{ identifier: 'Pembroke Welsh corgi', confidence: 0.4 }])?.breed === '柯基', '认出柯基');
 assert(breedFromLabels([{ identifier: 'dog', confidence: 0.9 }]) == null, '只有狗看不出品种');
+assert(expenseCategoryForFood('staple') === 'food' && expenseCategoryForFood('can') === 'food', '主粮和罐头记成粮食');
+assert(expenseCategoryForFood('snack') === 'snack', '零食种类记成零食');
+assert(linkedFoodSpend({ ...base, expenses: [{ id: 'e1', petId: 'p1', date: today, amount: 88, category: 'food', note: '', sourceType: 'food', sourceId: 'bag' }] }, 'bag') === 88, '口粮和记账是同一笔');
+assert(figureFor('dog', '柯基').height < figureFor('dog', '金毛').height, '柯基比金毛矮');
+assert(figureFor('dog', '腊肠').length > figureFor('dog', '吉娃娃').length, '腊肠身子更长');
+assert(figureFor('cat', '苏格兰折耳猫').ear === 'fold', '折耳是折的');
+assert(figureFor('dog', '法国斗牛犬').ear === 'bat', '法斗大耳朵');
+assert(figureFor('dog', '斗牛犬').ear !== 'bat', '斗牛犬不是法斗');
+assert(figureFor('cat', '').title === '猫', '没填品种就是猫');
+assert(figureFor('dog', '串串').length === figureFor('dog', '').length, '不认识的品种用狗的体型');
+assert(breedNames('dog').length >= 20, '狗的可选品种不少于 20');
+assert(breedNames('cat').length >= 20, '猫的可选品种不少于 20');
+assert(new Set(breedNames('dog')).size === breedNames('dog').length, '狗的品种不重复');
+assert(new Set(breedNames('cat')).size === breedNames('cat').length, '猫的品种不重复');
+assert(breedNames('dog').includes('柯基') && breedNames('cat').includes('英国短毛猫'), '常见品种在列表里');
 
 console.log('domain rules ok');

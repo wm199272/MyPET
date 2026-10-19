@@ -13,6 +13,9 @@ export type LineIconName =
   | 'bath'
   | 'bug'
   | 'wallet'
+  | 'bowl'
+  | 'checkup'
+  | 'vaccine'
   | 'check';
 
 const stroke = {
@@ -70,5 +73,8 @@ function paths(name: LineIconName, color: ColorValue) {
   if (name === 'bath') return <Path {...pen} d="M5 12h14v2.5A4.5 4.5 0 0 1 14.5 19h-5A4.5 4.5 0 0 1 5 14.5zM8 12V8.5A2.5 2.5 0 0 1 10.5 6H12M8 6.5c.6-.8 1.6-.8 2.2 0" />;
   if (name === 'bug') return <Path {...pen} d="M9 8.5a3 3 0 0 1 6 0V14a3 3 0 0 1-6 0zM12 5.5V8M5.5 10.5 8 12M18.5 10.5 16 12M6 16.5 8.2 15M18 16.5 15.8 15M9 18.5v2M15 18.5v2" />;
   if (name === 'wallet') return <Path {...pen} d="M4.5 7.5h13A1.5 1.5 0 0 1 19 9v8.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8zM3 10.5h16M15.5 14h.01" />;
+  if (name === 'bowl') return <Path {...pen} d="M5 10.5h14l-1.2 6.4a2 2 0 0 1-2 1.6H8.2a2 2 0 0 1-2-1.6zM8.2 10.5c.2-2.2 1.8-3.8 3.8-3.8s3.6 1.6 3.8 3.8" />;
+  if (name === 'checkup') return <Path {...pen} d="M8 4.8h8a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5.8a1 1 0 0 1 1-1zM10 4.8V4h4v.8M12 9v6M9 12h6" />;
+  if (name === 'vaccine') return <Path {...pen} d="M14.2 4.2 19.8 9.8M15.6 5.6 7.2 14M5.6 15.6 4.2 19.8 8.4 18.4M8.6 12.6l2.8 2.8M11.8 7.8l2.6 2.6" />;
   return <Path {...pen} d="M5 12.5 9.2 17 19 7" />;
 }

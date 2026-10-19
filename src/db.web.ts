@@ -6,12 +6,14 @@ import {
   ExpenseCategory,
   ExpenseRecord,
   FoodRecord,
+  Garment,
   Pet,
   Settings,
   VaccineRecord,
   WeightRecord,
   defaultSettings,
   emptyArchive,
+  expenseCategoryForFood,
 } from '@/src/domain';
 
 const KEY = 'pet-archive-web-v1';
@@ -29,11 +31,17 @@ function read(): Persisted {
       ...pet,
       weightUnit: pet.weightUnit === 'kg' || pet.weightUnit === 'jin' ? pet.weightUnit : settings.weightUnit,
     }));
+    data.garments = (data.garments || []).map((row) => ({
+      ...row,
+      kind: row.kind === 'onesie' || row.kind === 'cooling' ? row.kind : 'harness',
+      worn: Boolean(row.worn),
+    }));
     data.foods = (data.foods || []).map((food) => ({
       ...food,
       guideId: food.guideId || '',
       bagGrams: typeof food.bagGrams === 'number' ? food.bagGrams : null,
       dailyGrams: typeof food.dailyGrams === 'number' ? food.dailyGrams : null,
+      cost: typeof food.cost === 'number' ? food.cost : null,
     }));
     if (!data.pets.some((pet) => pet.id === settings.currentPetId)) {
       settings.currentPetId = data.pets[0]?.id ?? '';
@@ -83,6 +91,7 @@ export async function deletePet(id: string) {
   state.data.vaccines = state.data.vaccines.filter((row) => row.petId !== id);
   state.data.expenses = state.data.expenses.filter((row) => row.petId !== id);
   state.data.foods = state.data.foods.filter((row) => row.petId !== id);
+  state.data.garments = (state.data.garments || []).filter((row) => row.petId !== id);
   if (state.settings.currentPetId === id) state.settings.currentPetId = state.data.pets[0]?.id ?? '';
   write(state);
 }
@@ -98,7 +107,7 @@ export async function saveWeight(row: WeightRecord) {
 
 function syncLinkedExpense(
   state: Persisted,
-  sourceType: 'checkup' | 'bath' | 'vaccine',
+  sourceType: 'checkup' | 'bath' | 'vaccine' | 'food',
   sourceId: string,
   petId: string,
   date: string,
@@ -170,10 +179,16 @@ export async function saveExpense(row: ExpenseRecord) {
     previous.sourceId &&
     (previous.sourceType !== next.sourceType || previous.sourceId !== next.sourceId)
   ) {
-    writeCareCost(state, previous.sourceType, previous.sourceId, null);
+    if (previous.sourceType === 'food') writeFoodCost(state, previous.sourceId, null);
+    else if (isCareSource(previous.sourceType)) writeCareCost(state, previous.sourceType, previous.sourceId, null);
   }
-  if (next.sourceType && next.sourceId) writeCareCost(state, next.sourceType, next.sourceId, next.amount);
+  if (next.sourceType === 'food' && next.sourceId) writeFoodCost(state, next.sourceId, next.amount);
+  else if (isCareSource(next.sourceType) && next.sourceId) writeCareCost(state, next.sourceType, next.sourceId, next.amount);
   write(state);
+}
+
+function isCareSource(source: ExpenseRecord['sourceType']): source is 'checkup' | 'bath' | 'vaccine' {
+  return source === 'checkup' || source === 'bath' || source === 'vaccine';
 }
 
 function writeCareCost(
@@ -193,9 +208,33 @@ function writeCareCost(
   }
 }
 
+function writeFoodCost(state: Persisted, foodId: string, cost: number | null) {
+  state.data.foods = state.data.foods.map((item) => (item.id === foodId ? { ...item, cost } : item));
+}
+
+function syncFoodExpense(state: Persisted, row: FoodRecord) {
+  const existing = state.data.expenses.find((item) => item.sourceType === 'food' && item.sourceId === row.id);
+  if (row.cost == null || row.cost <= 0) {
+    state.data.expenses = state.data.expenses.filter((item) => item.id !== existing?.id);
+    return;
+  }
+  const next: ExpenseRecord = {
+    id: existing?.id || `food-${row.id}`,
+    petId: row.petId,
+    date: existing?.date || row.loggedOn,
+    amount: row.cost,
+    category: expenseCategoryForFood(row.kind),
+    note: existing?.note || row.brand,
+    sourceType: 'food',
+    sourceId: row.id,
+  };
+  state.data.expenses = upsert(state.data.expenses, next);
+}
+
 export async function saveFood(row: FoodRecord) {
   const state = read();
-  state.data.foods = upsert(state.data.foods, row);
+  state.data.foods = upsert(state.data.foods, { ...row, cost: row.cost ?? null });
+  syncFoodExpense(state, row);
   write(state);
 }
 
@@ -206,10 +245,32 @@ export async function deleteRecord(type: 'weight' | 'checkup' | 'bath' | 'deworm
   if (type === 'bath') state.data.baths = state.data.baths.filter((row) => row.id !== id);
   if (type === 'deworm') state.data.deworms = state.data.deworms.filter((row) => row.id !== id);
   if (type === 'vaccine') state.data.vaccines = state.data.vaccines.filter((row) => row.id !== id);
-  if (type === 'expense') state.data.expenses = state.data.expenses.filter((row) => row.id !== id);
+  if (type === 'expense') {
+    const row = state.data.expenses.find((item) => item.id === id);
+    if (row?.sourceType === 'food' && row.sourceId) writeFoodCost(state, row.sourceId, null);
+    state.data.expenses = state.data.expenses.filter((item) => item.id !== id);
+  }
   if (type === 'food') state.data.foods = state.data.foods.filter((row) => row.id !== id);
-  if (type === 'checkup' || type === 'bath' || type === 'vaccine') {
+  if (type === 'checkup' || type === 'bath' || type === 'vaccine' || type === 'food') {
     state.data.expenses = state.data.expenses.filter((row) => !(row.sourceType === type && row.sourceId === id));
   }
+  write(state);
+}
+
+export async function saveGarment(row: Garment) {
+  const state = read();
+  state.data.garments = upsert(state.data.garments || [], row);
+  write(state);
+}
+
+export async function deleteGarment(id: string) {
+  const state = read();
+  state.data.garments = (state.data.garments || []).filter((row) => row.id !== id);
+  write(state);
+}
+
+export async function wearGarment(petId: string, id: string) {
+  const state = read();
+  state.data.garments = (state.data.garments || []).map((row) => (row.petId === petId ? { ...row, worn: row.id === id } : row));
   write(state);
 }

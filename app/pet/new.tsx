@@ -4,10 +4,13 @@ import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BreedPicker } from '@/src/components/BreedPicker';
+import { PetStage } from '@/src/components/PetStage';
 import { DateField } from '@/src/components/WheelDatePicker';
 import { UpgradeSheet } from '@/src/components/UpgradeSheet';
 import { Button, Field, Segment, TextField } from '@/src/components/ui';
 import { Gender, Pet, Species, defaultBathInterval, petLimitFor, todayISO, uid } from '@/src/domain';
+import { breedNames, figureFor } from '@/src/petFigure';
 import { pickImage } from '@/src/pickImage';
 import { guessBreed } from '@/src/guessBreed';
 import { useArchive } from '@/src/store';
@@ -99,7 +102,12 @@ export default function NewPetScreen() {
             <Field label="物种" error={errors.species}>
               <Segment
                 value={species}
-                onChange={(value) => { setSpecies(value); setErrors((prev) => ({ ...prev, species: '' })); }}
+                onChange={(value) => {
+                  setSpecies(value);
+                  if (value === 'other') setBreed('');
+                  else if (breed && !breedNames(value).includes(breed)) setBreed('');
+                  setErrors((prev) => ({ ...prev, species: '' }));
+                }}
                 options={[{ value: 'cat', label: '猫' }, { value: 'dog', label: '狗' }, { value: 'other', label: '其他' }]}
               />
             </Field>
@@ -137,10 +145,10 @@ export default function NewPetScreen() {
               {avatar ? <Image source={{ uri: avatar }} style={styles.avatarImage} /> : <Ionicons name="image-outline" size={28} color={colors.primary} />}
               <Text style={styles.avatarText}>{avatar ? '更换头像' : '添加头像'}</Text>
             </Pressable>
-            <Text style={styles.avatarHint}>上传后会根据照片猜测品种，可以再改。</Text>
-            <Field label="品种">
-              <TextField value={breed} onChangeText={setBreed} placeholder="例如：英国短毛猫" />
-            </Field>
+            <Text style={styles.avatarHint}>上传后会根据照片猜测品种，也可以在下面选。</Text>
+            {species ? <PetStage species={species} breed={breed} /> : null}
+            {species && species !== 'other' ? <Text style={styles.preview}>{figureFor(species, breed).title}</Text> : null}
+            {species ? <BreedPicker species={species} value={breed} onChange={setBreed} /> : null}
             <Field label="绝育">
               <Segment value={neutered ? 'yes' : 'no'} onChange={(value) => setNeutered(value === 'yes')} options={[{ value: 'no', label: '还没有' }, { value: 'yes', label: '已绝育' }]} />
             </Field>
@@ -171,4 +179,5 @@ const styles = StyleSheet.create({
   avatarImage: { width: 88, height: 88, borderRadius: 44 },
   avatarText: { marginTop: 8, color: colors.primary, fontWeight: '600' },
   avatarHint: { textAlign: 'center', color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: -12, marginBottom: 16 },
+  preview: { textAlign: 'center', color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 8, marginBottom: 12 },
 });

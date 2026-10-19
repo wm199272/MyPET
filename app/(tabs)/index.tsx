@@ -1,22 +1,25 @@
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyPets } from '@/src/components/EmptyPets';
-import { LineIcon, LineIconName } from '@/src/components/LineIcon';
+import { LineIcon } from '@/src/components/LineIcon';
+import { PetStage } from '@/src/components/PetStage';
 import { MilestoneSheet } from '@/src/components/MilestoneSheet';
 import { PetAvatar } from '@/src/components/PetAvatar';
 import { Card, Countdown, SectionTitle } from '@/src/components/ui';
 import {
   Milestone,
-  RecordType,
   Suggestion,
   ageLabel,
   buildSuggestions,
   buildTimeline,
+  foodKindLabel,
   forecastFood,
   formatDate,
+  formatMoney,
+  linkedFoodSpend,
   listDue,
   listMilestones,
   listOnThisDay,
@@ -24,15 +27,10 @@ import {
   recordTypeLabel,
   speciesLabel,
 } from '@/src/domain';
+import { castFortune } from '@/src/fortune';
+import { figureFor } from '@/src/petFigure';
 import { useArchive } from '@/src/store';
 import { colors, shadow } from '@/src/theme';
-
-const shortcuts: { type: RecordType; label: string; icon: LineIconName }[] = [
-  { type: 'weight', label: '体重', icon: 'scale' },
-  { type: 'bath', label: '洗澡', icon: 'bath' },
-  { type: 'deworm', label: '驱虫', icon: 'bug' },
-  { type: 'expense', label: '记账', icon: 'wallet' },
-];
 
 export default function HomeScreen() {
   const archive = useArchive();
@@ -48,14 +46,19 @@ export default function HomeScreen() {
   const milestones = listMilestones(pet, archive.data, unit);
   const memories = listOnThisDay(archive.data, pet.id, unit);
   const rations = archive.data.foods.flatMap((food) => {
-    if (food.petId !== pet.id) return [];
+    if (food.petId !== pet.id || food.remaining === 'finished') return [];
     const forecast = forecastFood(pet, archive.data.weights, food);
-    return forecast ? [{ food, forecast }] : [];
+    const spend = linkedFoodSpend(archive.data, food.id) ?? (food.cost != null && food.cost > 0 ? food.cost : null);
+    if (!forecast && spend == null) return [];
+    return [{ food, forecast, spend }];
   });
   const suggestions = buildSuggestions(pet, archive.data, unit).slice(0, 2);
   const recent = buildTimeline(archive.data, unit)
     .filter((item) => item.petId === pet.id)
     .slice(0, 3);
+  const reading = castFortune(pet);
+  const worn = archive.data.garments.find((item) => item.petId === pet.id && item.worn) || null;
+  const figure = figureFor(pet.species, pet.breed);
 
   return (
     <View style={styles.screen}>
@@ -75,6 +78,43 @@ export default function HomeScreen() {
           </Pressable>
         </Card>
       </View>
+
+      <View style={styles.stageCard}>
+        <PetStage species={pet.species} breed={pet.breed} garment={worn ? { kind: worn.kind, photo: worn.photo } : null} />
+        <View style={styles.stageBar}>
+          <View style={styles.recentBody}>
+            <Text style={styles.dueTitle}>立体形象 · {figure.title}</Text>
+            <Text style={styles.dueSub}>拖动可以转动{worn ? ` · 穿着${worn.name}` : ''}</Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="试衣间" onPress={() => router.push('/wardrobe')} style={styles.cardHit}>
+            <Text style={styles.switch}>试衣间</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`给${pet.name}算一卦`}
+        style={styles.fortune}
+        onPress={() => router.push('/fortune' as Href)}>
+        {reading ? <HexStamp bits={reading.bits} moving={reading.moving} /> : null}
+        <View style={styles.recentBody}>
+          <Text style={styles.dueTitle}>给{pet.name}算一卦</Text>
+          <Text style={styles.dueSub}>用生日{pet.adoptedOn ? '和到家日' : ''}</Text>
+        </View>
+        <Text style={styles.switch}>看卦</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`给${pet.name}摇铜钱`}
+        style={styles.fortune}
+        onPress={() => router.push('/fortune/coins' as Href)}>
+        <View style={styles.recentBody}>
+          <Text style={styles.dueTitle}>摇铜钱</Text>
+          <Text style={styles.dueSub}>问眼前的一件事，摇六次</Text>
+        </View>
+        <Text style={styles.switch}>去摇</Text>
+      </Pressable>
 
       {milestones.length > 0 ? (
         <>
@@ -114,9 +154,14 @@ export default function HomeScreen() {
           {rations.map((item) => (
             <Pressable key={item.food.id} style={styles.recent} onPress={() => router.push(`/record/food?id=${item.food.id}`)}>
               <View style={styles.recentBody}>
-                <Text style={styles.dueTitle}>{item.food.brand}</Text>
-                <Text style={styles.dueTitle}>每天 {item.forecast.dailyGrams} 克 · {rationStatus(item.forecast)}</Text>
-                <Text style={styles.dueSub}>{formatDate(item.forecast.finishOn)}吃完</Text>
+                <Text style={styles.dueTitle}>{foodKindLabel[item.food.kind]} · {item.food.brand}</Text>
+                {item.forecast ? (
+                  <Text style={styles.dueTitle}>每天 {item.forecast.dailyGrams} 克 · {rationStatus(item.forecast)}</Text>
+                ) : null}
+                <Text style={styles.dueSub}>
+                  {item.forecast ? `${formatDate(item.forecast.finishOn)}吃完` : item.food.expiresOn ? `保质期 ${formatDate(item.food.expiresOn)}` : '补上公斤和开封日期后会估算吃完'}
+                  {item.spend != null ? ` · ${formatMoney(item.spend)}` : ''}
+                </Text>
               </View>
             </Pressable>
           ))}
@@ -153,19 +198,6 @@ export default function HomeScreen() {
         ))
       )}
 
-      <View style={styles.shortcuts}>
-        {shortcuts.map((item) => (
-          <Pressable key={item.type} accessibilityRole="button" accessibilityLabel={item.label} style={styles.shortcut} onPress={() => router.push(`/record/${item.type}?from=home`)}>
-            <View style={styles.shortcutIcon}>
-              <LineIcon name={item.icon} size={22} color={colors.primary} />
-            </View>
-            <Text style={styles.shortcutLabel}>{item.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="登记猫粮或狗粮" style={styles.rationEntry} onPress={() => router.push('/record/food?from=home')}>
-        <Text style={styles.switch}>登记猫粮 / 狗粮</Text>
-      </Pressable>
     </ScrollView>
       <Modal visible={switching} transparent animationType="slide" onRequestClose={() => setSwitching(false)}>
         <Pressable style={styles.backdrop} onPress={() => setSwitching(false)}>
@@ -231,6 +263,25 @@ function openSuggestion(item: Suggestion) {
   router.push(`/record/${item.recordType}`);
 }
 
+function HexStamp({ bits, moving }: { bits: string; moving: number }) {
+  return (
+    <View style={styles.stamp}>
+      {bits.split('').reverse().map((bit, index) => {
+        const on = bits.length - index === moving;
+        const color = on ? colors.primary : colors.text;
+        if (bit === '1') return <View key={index} style={[styles.stampYang, { backgroundColor: color }]} />;
+        return (
+          <View key={index} style={styles.stampYin}>
+            <View style={[styles.stampHalf, { backgroundColor: color }]} />
+            <View style={styles.stampGap} />
+            <View style={[styles.stampHalf, { backgroundColor: color }]} />
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 20, paddingBottom: 40 },
@@ -241,6 +292,14 @@ const styles = StyleSheet.create({
   petName: { fontSize: 22, fontWeight: '500', color: colors.text, lineHeight: 30 },
   petMeta: { marginTop: 4, color: colors.textSecondary, fontSize: 14, lineHeight: 22 },
   switchHit: { position: 'absolute', top: 8, right: 8, zIndex: 2, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  stageCard: { backgroundColor: colors.card, borderRadius: 20, marginBottom: 8, overflow: 'hidden' },
+  stageBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  fortune: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.card, borderRadius: 20, padding: 16, marginBottom: 8, minHeight: 64 },
+  stamp: { width: 36, gap: 3 },
+  stampYang: { height: 3, borderRadius: 2 },
+  stampYin: { flexDirection: 'row', height: 3 },
+  stampHalf: { flex: 1, borderRadius: 2 },
+  stampGap: { width: 4 },
   switch: { color: colors.primary, fontSize: 14, fontWeight: '500' },
   quiet: { color: colors.textSecondary, fontSize: 14, lineHeight: 22, marginBottom: 8 },
   dueRow: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 20, marginBottom: 10, overflow: 'hidden', minHeight: 64 },
@@ -256,18 +315,6 @@ const styles = StyleSheet.create({
   recentType: { minWidth: 44, color: colors.primary, fontSize: 13, fontWeight: '500', lineHeight: 20 },
   recentBody: { flex: 1 },
   cardHit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  shortcuts: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 22 },
-  shortcut: { alignItems: 'center', minWidth: 64, minHeight: 44 },
-  shortcutIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shortcutLabel: { marginTop: 8, fontSize: 13, color: colors.text },
-  rationEntry: { marginTop: 18, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   backdrop: { flex: 1, backgroundColor: 'rgba(61,51,53,0.28)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 28 },
   sheetTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 8 },

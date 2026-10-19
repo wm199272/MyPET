@@ -19,6 +19,8 @@ import {
   checkupItems,
   diffDays,
   displayToKg,
+  expenseCategoryForFood,
+  foodKindLabel,
   formatDate,
   forecastFood,
   isRecordType,
@@ -28,6 +30,7 @@ import {
   todayISO,
   uid,
 } from '@/src/domain';
+import { brandsFor } from '@/src/foodBrands';
 import { guidesFor } from '@/src/feedingGuides';
 import { medicinesFor } from '@/src/dewormMedicines';
 import { pickImage } from '@/src/pickImage';
@@ -452,16 +455,33 @@ function VaccineForm({ recordId }: { recordId: string }) {
 function ExpenseForm({ recordId }: { recordId: string }) {
   const archive = useArchive();
   const existing = archive.data.expenses.find((row) => row.id === recordId);
+  const linkedFood = existing?.sourceType === 'food' ? archive.data.foods.find((row) => row.id === existing.sourceId) : undefined;
   const choice = usePetChoice(existing?.petId || '');
   const [date, setDate] = useState(existing?.date || todayISO());
   const [amount, setAmount] = useState(existing ? existing.amount.toFixed(2) : '');
   const [category, setCategory] = useState<ExpenseCategory>(existing?.category || 'food');
   const [note, setNote] = useState(existing?.note || '');
-  const [link, setLink] = useState(existing?.sourceType && existing.sourceId ? `${existing.sourceType}:${existing.sourceId}` : '');
+  const [link, setLink] = useState(existing?.sourceType && existing.sourceType !== 'food' && existing.sourceId ? `${existing.sourceType}:${existing.sourceId}` : '');
+  const [foodKind, setFoodKind] = useState<FoodKind>(linkedFood?.kind || (existing?.category === 'snack' ? 'snack' : 'staple'));
+  const [bagId, setBagId] = useState(linkedFood?.id || '');
+  const [newBrand, setNewBrand] = useState('');
+  const [newExpires, setNewExpires] = useState('');
+  const [draftFoodId] = useState(uid);
+  const [pickingBag, setPickingBag] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const foodish = category === 'food' || category === 'snack';
   const careOptions = careLinks(archive.data, choice.pet.id);
   const activeLink = careOptions.some((item) => item.value === link) ? link : '';
+  const bags = archive.data.foods.filter((row) => row.petId === choice.pet.id && row.kind === foodKind && (row.remaining !== 'finished' || row.id === bagId));
+  const selectedBag = bags.find((row) => row.id === bagId);
+
+  function chooseKind(kind: FoodKind) {
+    setFoodKind(kind);
+    setCategory(kind === 'snack' ? 'snack' : 'food');
+    setLink('');
+    if (selectedBag?.kind !== kind) setBagId('');
+  }
 
   async function save() {
     const parsed = parseMoney(amount);
@@ -469,10 +489,48 @@ function ExpenseForm({ recordId }: { recordId: string }) {
       setError('请填写金额');
       return;
     }
+    setSaving(true);
+    if (foodish) {
+      const foodId = selectedBag?.id || draftFoodId;
+      const previous = archive.data.foods.find((row) => row.id === foodId);
+      const brand = previous?.brand || newBrand.trim() || note.trim() || foodKindLabel[foodKind];
+      await archive.saveFood({
+        id: foodId,
+        petId: choice.pet.id,
+        brand,
+        kind: foodKind,
+        spec: previous?.spec || '',
+        producedOn: previous?.producedOn || '',
+        expiresOn: previous?.expiresOn || newExpires,
+        openedOn: previous?.openedOn || '',
+        openedDays: previous?.openedDays ?? null,
+        remaining: previous?.remaining || 'plenty',
+        loggedOn: previous?.loggedOn || date,
+        guideId: previous?.guideId || '',
+        bagGrams: previous?.bagGrams ?? null,
+        dailyGrams: previous?.dailyGrams ?? null,
+        cost: parsed,
+      });
+      const prior = archive.data.expenses.find((row) => row.sourceType === 'food' && row.sourceId === foodId);
+      const expenseId = prior?.id || `food-${foodId}`;
+      await archive.saveExpense({
+        id: expenseId,
+        petId: choice.pet.id,
+        date,
+        amount: parsed,
+        category: expenseCategoryForFood(foodKind),
+        note: note.trim(),
+        sourceType: 'food',
+        sourceId: foodId,
+      });
+      if (existing && existing.id !== expenseId) await archive.removeRecord('expense', existing.id);
+      setSaving(false);
+      finish(archive.showToast);
+      return;
+    }
     const picked = careOptions.find((item) => item.value === activeLink);
     const sourceType = picked?.sourceType || '';
     const sourceId = picked?.sourceId || '';
-    setSaving(true);
     await archive.saveExpense({
       id: existing?.id || uid(),
       petId: choice.pet.id,
@@ -489,7 +547,7 @@ function ExpenseForm({ recordId }: { recordId: string }) {
 
   return (
     <FormShell onSave={() => void save()} saving={saving} onDelete={existing ? () => askDelete('删除后无法恢复。', () => archive.removeRecord('expense', existing.id)) : undefined}>
-      <PetChoice petId={choice.petId} pets={choice.pets} locked={choice.locked} onChange={choice.setPetId} />
+      <PetChoice petId={choice.petId} pets={choice.pets} locked={choice.locked} onChange={(id) => { choice.setPetId(id); setBagId(''); }} />
       <DateField label="日期" value={date} onChange={setDate} maximum={todayISO()} minimum="2010-01-01" />
       <Field label="金额（元）" error={error}>
         <TextField value={amount} onChangeText={(text) => { setAmount(sanitizeDecimal(text, 2)); setError(text.trim() ? '' : '请填写金额'); }} keyboardType="decimal-pad" placeholder="0.00" />
@@ -497,7 +555,13 @@ function ExpenseForm({ recordId }: { recordId: string }) {
       <Field label="分类">
         <Segment
           value={category}
-          onChange={setCategory}
+          onChange={(value) => {
+            setCategory(value);
+            if (value === 'snack') setFoodKind('snack');
+            if (value === 'food' && foodKind === 'snack') setFoodKind('staple');
+            if (value === 'food' || value === 'snack') setLink('');
+            else setBagId('');
+          }}
           options={[
             { value: 'food', label: '粮食' },
             { value: 'snack', label: '零食' },
@@ -508,7 +572,44 @@ function ExpenseForm({ recordId }: { recordId: string }) {
           ]}
         />
       </Field>
-      {careOptions.length > 1 ? (
+      {foodish ? (
+        <>
+          <Field label="种类">
+            <Segment
+              value={foodKind}
+              onChange={chooseKind}
+              options={[
+                { value: 'staple', label: '主粮' },
+                { value: 'snack', label: '零食' },
+                { value: 'can', label: '罐头' },
+                { value: 'supplement', label: '营养品' },
+              ]}
+            />
+          </Field>
+          {bags.length > 0 ? (
+            <Field label="哪一袋">
+              <Pressable accessibilityRole="button" accessibilityLabel={selectedBag ? selectedBag.brand : '新开一袋'} onPress={() => setPickingBag(true)} style={styles.guidePick}>
+                <Text style={styles.dueTitle}>{selectedBag ? selectedBag.brand : '新开一袋'}</Text>
+                <Text style={styles.note}>{selectedBag ? '这笔花费记在已登记的这袋上' : '记成一袋新口粮'}</Text>
+              </Pressable>
+            </Field>
+          ) : null}
+          {selectedBag ? null : (
+            <>
+              <Field label="品牌">
+                <TextField value={newBrand} onChangeText={setNewBrand} placeholder="例如：皇家" />
+              </Field>
+              <DateField label="保质期至" value={newExpires} onChange={setNewExpires} minimum="2015-01-01" maximum="2036-12-31" />
+            </>
+          )}
+          <Text style={styles.hint}>
+            {selectedBag
+              ? '会和这袋口粮共用同一笔花费。吃完日期和保质期会出现在首页提醒里。'
+              : '会同时登记一袋口粮。填了保质期后，到期会进首页提醒。主粮补上公斤和开封日期后，也会提醒该买粮。'}
+          </Text>
+        </>
+      ) : null}
+      {!foodish && careOptions.length > 1 ? (
         <Field label="关联护理记录">
           <Segment
             value={activeLink}
@@ -524,7 +625,25 @@ function ExpenseForm({ recordId }: { recordId: string }) {
       <Field label="备注">
         <TextField value={note} onChangeText={setNote} multiline />
       </Field>
-      {activeLink ? <Text style={styles.hint}>会和这条护理记录共用同一笔花费，不会再记一笔。</Text> : null}
+      {!foodish && activeLink ? <Text style={styles.hint}>会和这条护理记录共用同一笔花费，不会再记一笔。</Text> : null}
+      <Modal visible={pickingBag} transparent animationType="slide" onRequestClose={() => setPickingBag(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setPickingBag(false)}>
+          <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.sheetTitle}>选择这袋{foodKindLabel[foodKind]}</Text>
+            <ScrollView style={styles.guideList}>
+              <Pressable accessibilityRole="button" accessibilityLabel="新开一袋" style={styles.guideRow} onPress={() => { setBagId(''); setPickingBag(false); }}>
+                <Text style={styles.dueTitle}>新开一袋</Text>
+              </Pressable>
+              {bags.map((row) => (
+                <Pressable key={row.id} accessibilityRole="button" accessibilityLabel={row.brand} style={styles.guideRow} onPress={() => { setBagId(row.id); setPickingBag(false); }}>
+                  <Text style={styles.dueTitle}>{row.brand}</Text>
+                  <Text style={styles.note}>{row.expiresOn ? `保质期 ${formatDate(row.expiresOn)}` : '还没填保质期'}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </FormShell>
   );
 }
@@ -561,9 +680,13 @@ function FoodForm({ recordId }: { recordId: string }) {
   const [bagText, setBagText] = useState(existing?.bagGrams ? trimKg(existing.bagGrams / 1000) : '');
   const [dailyText, setDailyText] = useState(existing?.dailyGrams ? String(existing.dailyGrams) : '');
   const [picking, setPicking] = useState(false);
+  const [pickingBrand, setPickingBrand] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const linkedSpend = existing ? archive.data.expenses.find((row) => row.sourceType === 'food' && row.sourceId === existing.id) : undefined;
+  const [costText, setCostText] = useState(existing?.cost != null && existing.cost > 0 ? existing.cost.toFixed(2) : linkedSpend ? linkedSpend.amount.toFixed(2) : '');
   const guides = guidesFor(choice.pet.species);
+  const brands = brandsFor(choice.pet.species);
   const selectedGuide = guides.find((guide) => guide.id === guideId);
   const bagKg = parseDecimal(bagText, 2);
   const draftForecast = forecastFood(choice.pet, archive.data.weights, {
@@ -581,11 +704,13 @@ function FoodForm({ recordId }: { recordId: string }) {
     guideId,
     bagGrams: bagKg != null && bagKg > 0 ? Math.round(bagKg * 1000) : null,
     dailyGrams: guideId === 'custom' && /^\d+$/.test(dailyText) ? Number(dailyText) : null,
+    cost: null,
   });
 
   async function save() {
     const days = openedDays.trim();
     const usingRation = Boolean(guideId);
+    const money = parseMoney(costText);
     const next = {
       brand: brand.trim() ? '' : '请填写品牌',
       expiresOn: expiresOn ? '' : '请选择保质期',
@@ -594,6 +719,7 @@ function FoodForm({ recordId }: { recordId: string }) {
       daily: guideId !== 'custom' || (/^\d+$/.test(dailyText.trim()) && Number(dailyText) > 0) ? '' : '请填写每天吃多少克',
       openedOn: !usingRation || openedOn ? '' : '请选择开封日期',
       guide: guideId !== 'pending' ? '' : '请选择一个包装表',
+      cost: money === 'invalid' ? '请填写正确的金额' : '',
     };
     setErrors(next);
     if (Object.values(next).some(Boolean)) return;
@@ -604,7 +730,7 @@ function FoodForm({ recordId }: { recordId: string }) {
       petId: choice.pet.id,
       brand: brand.trim() || (guide ? `${guide.brand} ${guide.product}` : ''),
       kind,
-      spec: spec.trim(),
+      spec: guideId && bagKg != null && bagKg > 0 ? `${trimKg(bagKg)} 公斤` : spec.trim(),
       producedOn,
       expiresOn,
       openedOn,
@@ -614,6 +740,7 @@ function FoodForm({ recordId }: { recordId: string }) {
       guideId,
       bagGrams: bagKg != null && bagKg > 0 ? Math.round(bagKg * 1000) : null,
       dailyGrams: guideId === 'custom' ? Number(dailyText) : null,
+      cost: money != null && money !== 'invalid' && money > 0 ? money : null,
     });
     setSaving(false);
     finish(archive.showToast);
@@ -623,7 +750,20 @@ function FoodForm({ recordId }: { recordId: string }) {
     <FormShell onSave={() => void save()} saving={saving} onDelete={existing ? () => askDelete('删除后无法恢复。', () => archive.removeRecord('food', existing.id)) : undefined}>
       <PetChoice petId={choice.petId} pets={choice.pets} locked={choice.locked} onChange={choice.setPetId} />
       <Field label="品牌" error={errors.brand}>
-        <TextField value={brand} onChangeText={(text) => { setBrand(text); setErrors((prev) => ({ ...prev, brand: text.trim() ? '' : '请填写品牌' })); }} />
+        {kind === 'staple' ? (
+          <Pressable accessibilityRole="button" onPress={() => setPickingBrand(true)} style={styles.guidePick}>
+            <Text style={styles.dueTitle}>{brand.trim() || '选择常见主粮品牌'}</Text>
+            <Text style={styles.note}>也可以在下面自己写品牌和产品</Text>
+          </Pressable>
+        ) : null}
+        <TextField
+          value={brand}
+          onChangeText={(text) => {
+            setBrand(text);
+            if (selectedGuide && !text.startsWith(selectedGuide.brand)) setGuideId('');
+            setErrors((prev) => ({ ...prev, brand: text.trim() ? '' : '请填写品牌' }));
+          }}
+        />
       </Field>
       <Field label="种类">
         <Segment value={kind} onChange={setKind} options={[{ value: 'staple', label: '主粮' }, { value: 'snack', label: '零食' }, { value: 'can', label: '罐头' }, { value: 'supplement', label: '营养品' }]} />
@@ -660,7 +800,7 @@ function FoodForm({ recordId }: { recordId: string }) {
           ) : null}
           {guideId ? (
             <Field label="这袋有多少公斤" error={errors.bag}>
-              <TextField value={bagText} onChangeText={(text) => setBagText(sanitizeDecimal(text, 2))} keyboardType="decimal-pad" placeholder="例如：1.5" />
+              <TextField value={bagText} onChangeText={(text) => { setBagText(sanitizeDecimal(text, 2)); setErrors((prev) => ({ ...prev, bag: '' })); }} keyboardType="decimal-pad" placeholder="例如：1.5" />
             </Field>
           ) : null}
           {draftForecast ? (
@@ -674,9 +814,11 @@ function FoodForm({ recordId }: { recordId: string }) {
           ) : null}
         </>
       ) : null}
-      <Field label="规格">
-        <TextField value={spec} onChangeText={setSpec} placeholder="例如：1.5 公斤" />
-      </Field>
+      {kind === 'staple' && guideId ? null : (
+        <Field label="规格">
+          <TextField value={spec} onChangeText={setSpec} placeholder="例如：85 克 × 12" />
+        </Field>
+      )}
       <DateField label="生产日期" value={producedOn} onChange={setProducedOn} maximum={todayISO()} minimum="2015-01-01" />
       <DateField label="保质期至" value={expiresOn} onChange={(value) => { setExpiresOn(value); setErrors((prev) => ({ ...prev, expiresOn: '' })); }} error={errors.expiresOn} minimum="2015-01-01" maximum="2036-12-31" />
       <DateField label="开封日期" value={openedOn} onChange={(value) => { setOpenedOn(value); setErrors((prev) => ({ ...prev, openedOn: '' })); }} error={errors.openedOn} maximum={todayISO()} minimum="2015-01-01" />
@@ -686,6 +828,34 @@ function FoodForm({ recordId }: { recordId: string }) {
       <Field label="剩余">
         <Segment value={remaining} onChange={setRemaining} options={[{ value: 'plenty', label: '充足' }, { value: 'low', label: '不多' }, { value: 'finished', label: '已吃完' }]} />
       </Field>
+      <Field label="花费（元）" error={errors.cost}>
+        <TextField value={costText} onChangeText={(text) => { setCostText(sanitizeDecimal(text, 2)); setErrors((prev) => ({ ...prev, cost: '' })); }} keyboardType="decimal-pad" placeholder="不填则不记账" />
+      </Field>
+      <Text style={styles.hint}>填写后会计一笔{expenseCategoryForFood(kind) === 'snack' ? '零食' : '粮食'}，和这袋口粮是同一笔花费。</Text>
+      <Modal visible={pickingBrand} transparent animationType="slide" onRequestClose={() => setPickingBrand(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setPickingBrand(false)}>
+          <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.sheetTitle}>常见主粮品牌</Text>
+            <ScrollView style={styles.guideList}>
+              {brands.map((item) => (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.name}
+                  style={styles.guideRow}
+                  onPress={() => {
+                    setBrand(item.name);
+                    if (selectedGuide && selectedGuide.brand !== item.name) setGuideId('');
+                    setErrors((prev) => ({ ...prev, brand: '' }));
+                    setPickingBrand(false);
+                  }}>
+                  <Text style={styles.dueTitle}>{item.name}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <Modal visible={picking} transparent animationType="slide" onRequestClose={() => setPicking(false)}>
         <Pressable style={styles.backdrop} onPress={() => setPicking(false)}>
           <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>

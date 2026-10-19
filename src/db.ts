@@ -7,12 +7,14 @@ import {
   DewormRecord,
   ExpenseRecord,
   FoodRecord,
+  Garment,
   Pet,
   Settings,
   VaccineRecord,
   WeightRecord,
   defaultSettings,
   emptyArchive,
+  expenseCategoryForFood,
 } from '@/src/domain';
 
 const SCHEMA = `
@@ -109,6 +111,16 @@ CREATE TABLE IF NOT EXISTS foods (
   opened_days INTEGER,
   remaining TEXT NOT NULL,
   logged_on TEXT NOT NULL,
+  cost REAL,
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS garments (
+  id TEXT PRIMARY KEY NOT NULL,
+  pet_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  photo TEXT NOT NULL,
+  worn INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS settings (
@@ -136,6 +148,9 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       }
       if (!foodColumns.some((column) => column.name === 'daily_grams')) {
         await db.execAsync('ALTER TABLE foods ADD COLUMN daily_grams REAL');
+      }
+      if (!foodColumns.some((column) => column.name === 'cost')) {
+        await db.execAsync('ALTER TABLE foods ADD COLUMN cost REAL');
       }
       return db;
     });
@@ -187,7 +202,7 @@ function mapPet(row: PetRow): Pet {
 
 export async function loadState(): Promise<{ data: ArchiveData; settings: Settings }> {
   const db = await getDatabase();
-  const [pets, weights, checkups, baths, deworms, vaccines, expenses, foods, settingRows] = await Promise.all([
+  const [pets, weights, checkups, baths, deworms, vaccines, expenses, foods, garments, settingRows] = await Promise.all([
     db.getAllAsync<PetRow>('SELECT * FROM pets ORDER BY created_at ASC'),
     db.getAllAsync<{ id: string; pet_id: string; recorded_on: string; weight_kg: number; condition: WeightRecord['condition']; note: string }>(
       'SELECT * FROM weights',
@@ -207,9 +222,10 @@ export async function loadState(): Promise<{ data: ArchiveData; settings: Settin
     db.getAllAsync<{ id: string; pet_id: string; recorded_on: string; amount: number; category: ExpenseRecord['category']; note: string; source_type: ExpenseRecord['sourceType']; source_id: string }>(
       'SELECT * FROM expenses',
     ),
-    db.getAllAsync<{ id: string; pet_id: string; brand: string; kind: FoodRecord['kind']; spec: string; produced_on: string; expires_on: string; opened_on: string; opened_days: number | null; remaining: FoodRecord['remaining']; logged_on: string; guide_id: string | null; bag_grams: number | null; daily_grams: number | null }>(
+    db.getAllAsync<{ id: string; pet_id: string; brand: string; kind: FoodRecord['kind']; spec: string; produced_on: string; expires_on: string; opened_on: string; opened_days: number | null; remaining: FoodRecord['remaining']; logged_on: string; guide_id: string | null; bag_grams: number | null; daily_grams: number | null; cost: number | null }>(
       'SELECT * FROM foods',
     ),
+    db.getAllAsync<{ id: string; pet_id: string; kind: string; name: string; photo: string; worn: number }>('SELECT * FROM garments'),
     db.getAllAsync<{ key: string; value: string }>('SELECT * FROM settings'),
   ]);
 
@@ -294,6 +310,15 @@ export async function loadState(): Promise<{ data: ArchiveData; settings: Settin
       guideId: row.guide_id || '',
       bagGrams: row.bag_grams,
       dailyGrams: row.daily_grams,
+      cost: typeof row.cost === 'number' ? row.cost : null,
+    })),
+    garments: garments.map((row) => ({
+      id: row.id,
+      petId: row.pet_id,
+      kind: row.kind === 'onesie' || row.kind === 'cooling' ? row.kind : 'harness',
+      name: row.name,
+      photo: row.photo,
+      worn: row.worn === 1,
     })),
   };
 
@@ -393,7 +418,7 @@ export async function saveWeight(row: WeightRecord) {
 
 async function syncLinkedExpense(
   db: SQLite.SQLiteDatabase,
-  sourceType: 'checkup' | 'bath' | 'vaccine',
+  sourceType: 'checkup' | 'bath' | 'vaccine' | 'food',
   sourceId: string,
   petId: string,
   date: string,
@@ -509,6 +534,10 @@ export async function saveVaccine(row: VaccineRecord) {
   });
 }
 
+function isCareSource(source: ExpenseRecord['sourceType']): source is 'checkup' | 'bath' | 'vaccine' {
+  return source === 'checkup' || source === 'bath' || source === 'vaccine';
+}
+
 export async function saveExpense(row: ExpenseRecord) {
   const db = await getDatabase();
   let next = row;
@@ -545,9 +574,12 @@ export async function saveExpense(row: ExpenseRecord) {
     previous.source_id &&
     (previous.source_type !== next.sourceType || previous.source_id !== next.sourceId)
   ) {
-    await writeCareCost(db, previous.source_type, previous.source_id, null);
+    if (previous.source_type === 'food') await writeFoodCost(db, previous.source_id, null);
+    else if (isCareSource(previous.source_type)) await writeCareCost(db, previous.source_type, previous.source_id, null);
   }
-  if (next.sourceType && next.sourceId) {
+  if (next.sourceType === 'food' && next.sourceId) {
+    await writeFoodCost(db, next.sourceId, next.amount);
+  } else if (isCareSource(next.sourceType) && next.sourceId) {
     await writeCareCost(db, next.sourceType, next.sourceId, next.amount);
   }
 }
@@ -562,31 +594,74 @@ async function writeCareCost(
   await db.runAsync(`UPDATE ${table} SET cost = ? WHERE id = ?`, cost, sourceId);
 }
 
+async function writeFoodCost(db: SQLite.SQLiteDatabase, foodId: string, cost: number | null) {
+  await db.runAsync('UPDATE foods SET cost = ? WHERE id = ?', cost, foodId);
+}
+
+async function syncFoodExpense(db: SQLite.SQLiteDatabase, row: FoodRecord) {
+  const existing = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM expenses WHERE source_type = ? AND source_id = ?',
+    'food',
+    row.id,
+  );
+  if (row.cost == null || row.cost <= 0) {
+    if (existing) await db.runAsync('DELETE FROM expenses WHERE id = ?', existing.id);
+    return;
+  }
+  const category = expenseCategoryForFood(row.kind);
+  if (existing) {
+    await db.runAsync(
+      'UPDATE expenses SET pet_id = ?, amount = ?, category = ? WHERE id = ?',
+      row.petId,
+      row.cost,
+      category,
+      existing.id,
+    );
+    return;
+  }
+  await db.runAsync(
+    'INSERT INTO expenses (id, pet_id, recorded_on, amount, category, note, source_type, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    `food-${row.id}`,
+    row.petId,
+    row.loggedOn,
+    row.cost,
+    category,
+    row.brand,
+    'food',
+    row.id,
+  );
+}
+
 export async function saveFood(row: FoodRecord) {
   const db = await getDatabase();
-  await db.runAsync(
-    `INSERT INTO foods (id, pet_id, brand, kind, spec, produced_on, expires_on, opened_on, opened_days, remaining, logged_on, guide_id, bag_grams, daily_grams)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       pet_id = excluded.pet_id, brand = excluded.brand, kind = excluded.kind, spec = excluded.spec,
-       produced_on = excluded.produced_on, expires_on = excluded.expires_on, opened_on = excluded.opened_on,
-       opened_days = excluded.opened_days, remaining = excluded.remaining, logged_on = excluded.logged_on,
-       guide_id = excluded.guide_id, bag_grams = excluded.bag_grams, daily_grams = excluded.daily_grams`,
-    row.id,
-    row.petId,
-    row.brand,
-    row.kind,
-    row.spec,
-    row.producedOn,
-    row.expiresOn,
-    row.openedOn,
-    row.openedDays,
-    row.remaining,
-    row.loggedOn,
-    row.guideId,
-    row.bagGrams,
-    row.dailyGrams,
-  );
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO foods (id, pet_id, brand, kind, spec, produced_on, expires_on, opened_on, opened_days, remaining, logged_on, guide_id, bag_grams, daily_grams, cost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         pet_id = excluded.pet_id, brand = excluded.brand, kind = excluded.kind, spec = excluded.spec,
+         produced_on = excluded.produced_on, expires_on = excluded.expires_on, opened_on = excluded.opened_on,
+         opened_days = excluded.opened_days, remaining = excluded.remaining, logged_on = excluded.logged_on,
+         guide_id = excluded.guide_id, bag_grams = excluded.bag_grams, daily_grams = excluded.daily_grams,
+         cost = excluded.cost`,
+      row.id,
+      row.petId,
+      row.brand,
+      row.kind,
+      row.spec,
+      row.producedOn,
+      row.expiresOn,
+      row.openedOn,
+      row.openedDays,
+      row.remaining,
+      row.loggedOn,
+      row.guideId,
+      row.bagGrams,
+      row.dailyGrams,
+      row.cost,
+    );
+    await syncFoodExpense(db, row);
+  });
 }
 
 const tables = {
@@ -602,9 +677,43 @@ const tables = {
 export async function deleteRecord(type: keyof typeof tables, id: string) {
   const db = await getDatabase();
   await db.withTransactionAsync(async () => {
-    if (type === 'checkup' || type === 'bath' || type === 'vaccine') {
+    if (type === 'checkup' || type === 'bath' || type === 'vaccine' || type === 'food') {
       await db.runAsync('DELETE FROM expenses WHERE source_type = ? AND source_id = ?', type, id);
     }
+    if (type === 'expense') {
+      const row = await db.getFirstAsync<{ source_type: ExpenseRecord['sourceType']; source_id: string }>(
+        'SELECT source_type, source_id FROM expenses WHERE id = ?',
+        id,
+      );
+      if (row?.source_type === 'food' && row.source_id) await writeFoodCost(db, row.source_id, null);
+    }
     await db.runAsync(`DELETE FROM ${tables[type]} WHERE id = ?`, id);
+  });
+}
+
+export async function saveGarment(row: Garment) {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT INTO garments (id, pet_id, kind, name, photo, worn) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET pet_id = excluded.pet_id, kind = excluded.kind, name = excluded.name, photo = excluded.photo, worn = excluded.worn`,
+    row.id,
+    row.petId,
+    row.kind,
+    row.name,
+    row.photo,
+    row.worn ? 1 : 0,
+  );
+}
+
+export async function deleteGarment(id: string) {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM garments WHERE id = ?', id);
+}
+
+export async function wearGarment(petId: string, id: string) {
+  const db = await getDatabase();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE garments SET worn = 0 WHERE pet_id = ?', petId);
+    if (id) await db.runAsync('UPDATE garments SET worn = 1 WHERE id = ? AND pet_id = ?', id, petId);
   });
 }

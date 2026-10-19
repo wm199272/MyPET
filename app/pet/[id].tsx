@@ -4,9 +4,12 @@ import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BreedPicker } from '@/src/components/BreedPicker';
+import { PetStage } from '@/src/components/PetStage';
 import { DateField } from '@/src/components/WheelDatePicker';
 import { Button, Field, Segment, TextField } from '@/src/components/ui';
 import { Gender, Species, WeightUnit, countRecords, todayISO } from '@/src/domain';
+import { breedNames, figureFor } from '@/src/petFigure';
 import { pickImage } from '@/src/pickImage';
 import { guessBreed } from '@/src/guessBreed';
 import { useArchive } from '@/src/store';
@@ -43,6 +46,7 @@ function Editor({ petId }: { petId: string }) {
   const [reminders, setReminders] = useState(pet.remindersEnabled);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const worn = archive.data.garments.find((item) => item.petId === pet.id && item.worn) || null;
 
   function intervalError(value: string) {
     if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 365) return '请填写 1 到 365 的天数';
@@ -122,19 +126,28 @@ function Editor({ petId }: { petId: string }) {
           <Text style={styles.link}>{avatar ? '更换头像' : '添加头像'}</Text>
         </Pressable>
         <Text style={styles.avatarHint}>上传后会根据照片猜测品种，可以再改。</Text>
+        <PetStage species={species} breed={breed} garment={worn ? { kind: worn.kind, photo: worn.photo } : null} />
+        <View style={styles.stageBar}>
+          <Text style={styles.stageTitle}>立体形象 · {figureFor(species, breed).title}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="试衣间" onPress={() => router.push(`/wardrobe?petId=${pet.id}`)}>
+            <Text style={styles.link}>试衣间</Text>
+          </Pressable>
+        </View>
         <Field label="名字" error={errors.name}>
           <TextField value={name} onChangeText={(text) => { setName(text); setErrors((prev) => ({ ...prev, name: text.trim() ? '' : '请填写名字' })); }} />
         </Field>
         <Field label="物种">
-          <Segment value={species} onChange={setSpecies} options={[{ value: 'cat', label: '猫' }, { value: 'dog', label: '狗' }, { value: 'other', label: '其他' }]} />
+          <Segment value={species} onChange={(value) => {
+            setSpecies(value);
+            if (value === 'other') setBreed('');
+            else if (breed && !breedNames(value).includes(breed)) setBreed('');
+          }} options={[{ value: 'cat', label: '猫' }, { value: 'dog', label: '狗' }, { value: 'other', label: '其他' }]} />
         </Field>
         <Field label="性别">
           <Segment value={gender} onChange={setGender} options={[{ value: 'female', label: '母' }, { value: 'male', label: '公' }, { value: 'unknown', label: '未知' }]} />
         </Field>
         <DateField label="生日" value={birthday} onChange={setBirthday} error={errors.birthday} maximum={todayISO()} minimum="1995-01-01" />
-        <Field label="品种">
-          <TextField value={breed} onChangeText={setBreed} placeholder="例如：英国短毛猫" />
-        </Field>
+        <BreedPicker species={species} value={breed} onChange={setBreed} />
         <Field label="绝育">
           <Segment value={neutered ? 'yes' : 'no'} onChange={(value) => setNeutered(value === 'yes')} options={[{ value: 'no', label: '还没有' }, { value: 'yes', label: '已绝育' }]} />
         </Field>
@@ -178,6 +191,8 @@ const styles = StyleSheet.create({
   avatarImage: { width: 88, height: 88, borderRadius: 44 },
   link: { marginTop: 8, color: colors.primary, fontWeight: '600' },
   avatarHint: { textAlign: 'center', color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: -8, marginBottom: 16 },
+  stageBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 16 },
+  stageTitle: { fontSize: 15, color: colors.text, fontWeight: '500' },
   remind: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   remindText: { fontSize: 16, color: colors.text },
   footer: { paddingHorizontal: 20, paddingTop: 8 },

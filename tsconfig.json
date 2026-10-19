@@ -16,6 +16,8 @@
     "expo-env.d.ts"
   ],
   "exclude": [
-    "src/domain.test.ts"
+    "src/domain.test.ts",
+    "src/fortune.test.ts",
+    "src/pay.test.ts"
   ]
 }
